@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Logo with explicit horizontal dimensions (200dp x 32dp = 6.25:1 aspect ratio) -->
+    <item
+        android:width="200dp"
+        android:height="32dp"
+        android:gravity="center"
+        android:drawable="@drawable/splash_logo" />
+</layer-list>
+

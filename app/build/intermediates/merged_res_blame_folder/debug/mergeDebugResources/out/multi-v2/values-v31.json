@@ -1,0 +1,47 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.kaleidofin.originator.app-mergeDebugResources-48:/values-v31/values-v31.xml",
+            "map": [
+                {
+                    "source": "/Users/yeswanthchowdary/.gradle/caches/8.13/transforms/60f426de36f73cf9b7d6610a88d393ea/transformed/core-splashscreen-1.0.1/res/values-v31/values-v31.xml",
+                    "from": {
+                        "startLines": "2,9",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,473",
+                        "endLines": "8,13",
+                        "endColumns": "12,12",
+                        "endOffsets": "468,697"
+                    },
+                    "to": {
+                        "startLines": "11,18",
+                        "startColumns": "4,4",
+                        "startOffsets": "590,1008",
+                        "endLines": "17,22",
+                        "endColumns": "12,12",
+                        "endOffsets": "1003,1232"
+                    }
+                },
+                {
+                    "source": "/Users/yeswanthchowdary/Desktop/yesh/Originator/app/src/main/res/values-v31/themes.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "10",
+                        "endColumns": "12",
+                        "endOffsets": "759"
+                    },
+                    "to": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "10",
+                        "endColumns": "12",
+                        "endOffsets": "585"
+                    }
+                }
+            ]
+        }
+    ]
+}
