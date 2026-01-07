@@ -61,6 +61,7 @@ data class FormField(
     val keyboard: String?,
     val maxLength: Int?,
     val required: Boolean,
+    val readOnly: Boolean = false,
     val value: Any?,
     val dataSource: FieldDataSource?,
     val enabledWhen: List<EnabledCondition>,

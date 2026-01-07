@@ -6,12 +6,12 @@ import com.kaleidofin.originator.domain.model.*
 fun FormScreenDto.toDomain(): FormScreen {
     return FormScreen(
         screenId = screenId,
-        flowId = flowId,
+        flowId = flowId ?: "",
         title = title,
-        layout = layout.toDomain(),
+        layout = actualLayout.toDomain(),
         hiddenFields = hiddenFields?.map { it.toDomain() } ?: emptyList(),
-        sections = sections.map { it.toDomain() },
-        actions = actions.map { it.toDomain() },
+        sections = actualSections.map { it.toDomain() },
+        actions = actualActions.map { it.toDomain() },
         modals = modals?.map { it.toDomain() } ?: emptyList()
     )
 }
@@ -43,10 +43,10 @@ fun HiddenFieldDto.toDomain(): HiddenField {
 
 fun SectionDto.toDomain(): FormSection {
     return FormSection(
-        sectionId = sectionId,
+        sectionId = actualSectionId,
         title = title,
-        collapsible = collapsible,
-        expanded = expanded ?: true,
+        collapsible = collapsible ?: false,
+        expanded = actualExpanded,
         repeatable = repeatable ?: false,
         minInstances = minInstances ?: 1,
         maxInstances = maxInstances,
@@ -54,9 +54,9 @@ fun SectionDto.toDomain(): FormSection {
         removeButtonText = removeButtonText,
         instanceLabel = instanceLabel,
         validationRules = validationRules?.map { it.toDomain() } ?: emptyList(),
-        fields = fields.map { it.toDomain() },
+        fields = fields?.map { it.toDomain() } ?: emptyList(),
         subSections = subSections?.map { it.toDomain() } ?: emptyList(),
-        subSectionOf = subSectionOf
+        subSectionOf = actualSubSectionOf
     )
 }
 
@@ -75,28 +75,36 @@ fun FieldDto.toDomain(): FormField {
         label = label,
         placeholder = placeholder,
         keyboard = keyboard,
-        maxLength = maxLength,
+        maxLength = maxLengthInt,
         required = required,
+        readOnly = readOnly,
         value = value,
         dataSource = dataSource?.toDomain(),
-        enabledWhen = enabledWhen?.map { it.toDomain() } ?: emptyList(),
+        enabledWhen = enabledWhenList.map { it.toDomain() },
         verification = verification?.toDomain(),
         validation = validation?.toDomain(),
         constraints = constraints?.toDomain(),
-        min = min,
-        max = max,
-        dateMode = dateMode,
-        minDate = minDate,
-        maxDate = maxDate
+        min = minInt,
+        max = maxInt,
+        dateMode = actualDateMode,
+        minDate = actualMinDate,
+        maxDate = actualMaxDate
     )
 }
 
 fun DataSourceDto.toDomain(): FieldDataSource {
+    // Normalize type names
+    val normalizedType = when (type.uppercase()) {
+        "STATIC_JSON" -> "INLINE"
+        "MASTER_DATA" -> "MASTER"
+        else -> type
+    }
+    
     return FieldDataSource(
-        type = type,
-        values = values,
-        key = key,
-        endpoint = endpoint,
+        type = normalizedType,
+        values = actualValues,
+        key = actualKey,
+        endpoint = actualEndpoint,
         method = method,
         dependsOn = dependsOn,
         paramKey = paramKey
@@ -138,7 +146,7 @@ fun FieldConstraintsDto.toDomain(): FieldConstraints {
 
 fun FormActionDto.toDomain(): FormAction {
     return FormAction(
-        type = type,
+        type = type ?: "SUBMIT",
         api = api,
         method = method,
         nextScreen = nextScreen
@@ -152,7 +160,7 @@ fun ModalDto.toDomain(): FormModal {
         header = header?.toDomain(),
         otp = otp?.toDomain(),
         consentText = consentText,
-        actions = actions.map { it.toDomain() }
+        actions = actions?.map { it.toDomain() } ?: emptyList()
     )
 }
 

@@ -109,7 +109,7 @@ fun DynamicFormField(
         shape = RoundedCornerShape(10.dp),
         isError = error != null,
         enabled = isEnabled,
-        readOnly = false, // Explicitly set to false to ensure input is allowed
+        readOnly = field.readOnly, // Use readOnly from field definition
         colors = TextFieldDefaults.colors(
             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
