@@ -189,27 +189,59 @@ class DynamicFormViewModel @Inject constructor(
         val state = _uiState.value
         val formScreen = state.formScreen
 
-        android.util.Log.d("DynamicFormViewModel", "Updating field: $finalId with value: '$value' (type: ${value::class.simpleName})")
+        android.util.Log.d("DynamicFormViewModel", "Updating field: $finalId (base fieldId: $fieldId, sectionIndex: $sectionIndex) with value: '$value'")
 
         // Check if this field has verification - if value changes, reset verification status
-        // Find field in sections and subsections recursively
+        // Find field in sections and subsections recursively (check all subsections, not just first)
         fun findFieldInAllSections(section: com.kaleidofin.originator.domain.model.FormSection): com.kaleidofin.originator.domain.model.FormField? {
-            return section.fields.find { it.id == fieldId } 
-                ?: section.subSections.firstOrNull()?.let { findFieldInAllSections(it) }
+            // First check fields in current section
+            section.fields.find { it.id == fieldId }?.let { return it }
+            
+            // Then check all subsections recursively
+            section.subSections.forEach { subSection ->
+                findFieldInAllSections(subSection)?.let { return it }
+            }
+            
+            return null
         }
         
         val field = formScreen?.sections?.firstNotNullOfOrNull { findFieldInAllSections(it) }
         val verificationStatusField = field?.verification?.statusField
         
+        android.util.Log.d("DynamicFormViewModel", "Found field: ${field?.id}, type: ${field?.type}, isVerifiedInputField: ${field?.type == "VERIFIED_INPUT" || field?.type == "API_VERIFICATION"}")
+        
         // Check if value actually changed
         val oldValue = state.formData[finalId]
         val valueChanged = oldValue?.toString() != value.toString()
+        
+        android.util.Log.d("DynamicFormViewModel", "Value changed: $valueChanged (old: '$oldValue', new: '$value')")
+        
+        // Determine if this is a verified input field - apply same logic for VERIFIED_INPUT and API_VERIFICATION
+        val isVerifiedInputField = field?.type == "VERIFIED_INPUT" || field?.type == "API_VERIFICATION"
+        // Use finalId to handle section indices correctly (e.g., "fieldId_0_verified")
+        // Both VERIFIED_INPUT and API_VERIFICATION use the same verification status key format
+        val verifiedStatusField = if (isVerifiedInputField) "${finalId}_verified" else null
+        
+        android.util.Log.d("DynamicFormViewModel", "Field type check - isVerifiedInputField: $isVerifiedInputField, verifiedStatusField: $verifiedStatusField")
 
         _uiState.update { currentState ->
             val newFormData = currentState.formData.toMutableMap().apply {
                 put(finalId, value)
                 
                 // Reset verification status when field value changes
+                // For VERIFIED_INPUT and API_VERIFICATION fields, reset {finalId}_verified
+                if (valueChanged && isVerifiedInputField && verifiedStatusField != null) {
+                    put(verifiedStatusField, false)
+                    android.util.Log.d("DynamicFormViewModel", "✅ Reset verification status for: $verifiedStatusField because field $finalId changed (field type: ${field?.type})")
+                } else if (valueChanged && isVerifiedInputField) {
+                    android.util.Log.w("DynamicFormViewModel", "⚠️ Field $finalId is verified input but verifiedStatusField is null (field type: ${field?.type})")
+                } else if (valueChanged && field != null) {
+                    android.util.Log.d("DynamicFormViewModel", "ℹ️ Field $finalId changed but is not verified input (field type: ${field.type})")
+                } else if (field == null) {
+                    android.util.Log.w("DynamicFormViewModel", "⚠️ Field $fieldId not found in form configuration")
+                }
+                
+                // For other verification fields, reset using verification.statusField
                 if (valueChanged && verificationStatusField != null) {
                     put(verificationStatusField, false)
                     android.util.Log.d("DynamicFormViewModel", "Reset verification status for: $verificationStatusField because field $finalId changed")
@@ -222,6 +254,12 @@ class DynamicFormViewModel @Inject constructor(
                 // Validation will happen on blur with the updated value
                 if (valueChanged) {
                     remove(finalId) // Clear error when value changes - will be re-validated on blur
+                    
+                    // Also clear verification error for verified input fields (VERIFIED_INPUT and API_VERIFICATION) when value changes
+                    if (isVerifiedInputField) {
+                        remove(finalId) // Clear any verification error
+                        android.util.Log.d("DynamicFormViewModel", "✅ Cleared verification error for field: $finalId (type: ${field?.type})")
+                    }
                 }
                 
                 // Clear errors for dependent fields that become disabled (including subsections)
@@ -348,7 +386,7 @@ class DynamicFormViewModel @Inject constructor(
 
     /* ---------------- PURE VALIDATION ---------------- */
 
-    private fun validateSingleField(field: FormField, value: Any?, sectionIndex: Int? = null): String? {
+    fun validateSingleField(field: FormField, value: Any?, sectionIndex: Int? = null): String? {
         val state = _uiState.value
         
         // Check if field is enabled based on enabledWhen conditions
@@ -378,6 +416,27 @@ class DynamicFormViewModel @Inject constructor(
             val num = value.toIntOrNull() ?: return "${field.label} must be a number"
             field.min?.let { if (num < it) return "${field.label} ≥ $it" }
             field.max?.let { if (num > it) return "${field.label} ≤ $it" }
+        }
+        
+        // Validate maxLength for text fields (including VERIFIED_INPUT and API_VERIFICATION)
+        if (value is String && value.isNotBlank() && field.maxLength != null) {
+            if (value.length > field.maxLength) {
+                return "${field.label} must be at most ${field.maxLength} characters"
+            }
+        }
+        
+        // Validate min/max length for string fields
+        if (value is String && value.isNotBlank()) {
+            field.min?.let { minLength ->
+                if (value.length < minLength) {
+                    return "${field.label} must be at least $minLength characters"
+                }
+            }
+            field.max?.let { maxLength ->
+                if (value.length > maxLength) {
+                    return "${field.label} must be at most $maxLength characters"
+                }
+            }
         }
 
         return null
@@ -609,6 +668,145 @@ class DynamicFormViewModel @Inject constructor(
         } else {
             // Exit flow - navigate back using navigation controller
             onExitFlow()
+        }
+    }
+    
+    /* ---------------- OTP VERIFICATION ---------------- */
+    
+    fun sendOtp(
+        endpoint: String,
+        method: String,
+        phoneNumber: String,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                // TODO: Replace with actual API call using endpoint and method
+                // For now, simulate OTP send
+                kotlinx.coroutines.delay(500) // Simulate network delay
+                
+                // Simulate success - in real implementation, make HTTP request
+                // val response = httpClient.post(endpoint) { body = json { put("phoneNumber", phoneNumber) } }
+                onSuccess()
+            } catch (e: Exception) {
+                onFailure(e.message ?: "Failed to send OTP")
+            }
+        }
+    }
+    
+    fun verifyOtp(
+        endpoint: String,
+        method: String,
+        phoneNumber: String,
+        otp: String,
+        fieldId: String,
+        fieldKey: String, // Field key with section index if applicable
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                // TODO: Replace with actual API call using endpoint and method
+                // For now, simulate OTP verification
+                kotlinx.coroutines.delay(500) // Simulate network delay
+                
+                // Simulate success - in real implementation, make HTTP request
+                // val response = httpClient.get(endpoint) { url { parameters.append("phoneNumber", phoneNumber); parameters.append("otp", otp) } }
+                // if (response.status.isSuccess()) {
+                //     updateFieldValue("${fieldId}_verified", true, null)
+                //     onSuccess()
+                // } else {
+                //     onFailure("Invalid OTP")
+                // }
+                
+                // For now, mark as verified on success
+                updateFieldValue("${fieldKey}_verified", true, null)
+                // Clear any verification error on success
+                clearFieldError(fieldKey)
+                onSuccess()
+            } catch (e: Exception) {
+                onFailure(e.message ?: "Failed to verify OTP")
+            }
+        }
+    }
+    
+    /* ---------------- API VERIFICATION ---------------- */
+    
+    fun verifyApi(
+        endpoint: String,
+        method: String,
+        requestMapping: String?,
+        fieldValue: String,
+        fieldId: String,
+        fieldKey: String, // Field key with section index if applicable
+        successCondition: com.kaleidofin.originator.domain.model.ApiVerificationSuccessCondition?,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                // TODO: Replace with actual API call using endpoint and method
+                // For now, simulate API verification
+                kotlinx.coroutines.delay(500) // Simulate network delay
+                
+                // Build request body from requestMapping if provided
+                // requestMapping format: {"pan":"{{panValue}}"}
+                // Replace {{fieldId}} or {{fieldValue}} with actual value
+                val requestBody = requestMapping?.replace("{{${fieldId}Value}}", fieldValue)
+                    ?.replace("{{${fieldId}}}", fieldValue)
+                    ?: "{}"
+                
+                // Simulate API response - in real implementation, make HTTP request
+                // val response = when (method.uppercase()) {
+                //     "GET" -> httpClient.get(endpoint) { url { parameters.append(fieldId, fieldValue) } }
+                //     "POST" -> httpClient.post(endpoint) { body = requestBody }
+                //     else -> throw IllegalArgumentException("Unsupported method: $method")
+                // }
+                // 
+                // val responseData = response.bodyAsText()
+                // val jsonResponse = Json.parseToJsonElement(responseData).jsonObject
+                // 
+                // Check success condition
+                // val isSuccess = successCondition?.let { condition ->
+                //     val fieldValue = jsonResponse[condition.field]?.asString
+                //     fieldValue == condition.equals
+                // } ?: response.status.isSuccess()
+                
+                // For now, simulate success - in real implementation, check actual response
+                // if (isSuccess) {
+                //     updateFieldValue("${fieldId}_verified", true, null)
+                //     onSuccess()
+                // } else {
+                //     onFailure("Verification failed")
+                // }
+                
+                // Simulate success for now
+                updateFieldValue("${fieldKey}_verified", true, null)
+                // Clear any verification error on success
+                clearFieldError(fieldKey)
+                onSuccess()
+            } catch (e: Exception) {
+                onFailure(e.message ?: "Failed to verify")
+            }
+        }
+    }
+    
+    /* ---------------- FIELD ERROR MANAGEMENT ---------------- */
+    
+    fun setFieldError(fieldKey: String, errorMessage: String) {
+        _uiState.update { state ->
+            val newErrors = state.fieldErrors.toMutableMap()
+            newErrors[fieldKey] = errorMessage
+            state.copy(fieldErrors = newErrors)
+        }
+    }
+    
+    fun clearFieldError(fieldKey: String) {
+        _uiState.update { state ->
+            val newErrors = state.fieldErrors.toMutableMap()
+            newErrors.remove(fieldKey)
+            state.copy(fieldErrors = newErrors)
         }
     }
 }

@@ -42,14 +42,25 @@ data class FormUiDto(
     val actualLayout: FormLayoutDto
         get() {
             return when {
-                layout.isJsonPrimitive && layout.asJsonPrimitive.isString -> {
-                    // Layout is a string like "FORM" - create default FormLayoutDto
-                    FormLayoutDto(
-                        type = layout.asString,
-                        submitButtonText = "Submit",
-                        stickyFooter = false,
-                        enableSubmitWhen = emptyList()
-                    )
+                layout.isJsonPrimitive -> {
+                    val primitive = layout.asJsonPrimitive
+                    if (primitive.isString) {
+                        // Layout is a string like "FORM" - create default FormLayoutDto
+                        FormLayoutDto(
+                            type = primitive.asString,
+                            submitButtonText = "Submit",
+                            stickyFooter = false,
+                            enableSubmitWhen = emptyList()
+                        )
+                    } else {
+                        // Fallback for non-string primitives
+                        FormLayoutDto(
+                            type = "FORM",
+                            submitButtonText = "Submit",
+                            stickyFooter = false,
+                            enableSubmitWhen = emptyList()
+                        )
+                    }
                 }
                 layout.isJsonObject -> {
                     // Layout is an object - deserialize normally
@@ -374,8 +385,16 @@ data class VerifiedInputOtpDto(
     @SerializedName("channel") val channel: String? = null,
     @SerializedName("otpLength") val otpLength: String? = null,
     @SerializedName("resendIntervalSeconds") val resendIntervalSeconds: String? = null,
-    @SerializedName("consent") val consent: Map<String, String>? = null,
+    @SerializedName("consent") val consent: VerifiedInputConsentDto? = null,
     @SerializedName("api") val api: Map<String, Any>? = null
+)
+
+data class VerifiedInputConsentDto(
+    @SerializedName("title") val title: String? = null,
+    @SerializedName("subTitle") val subTitle: String? = null,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("positiveButtonText") val positiveButtonText: String? = null,
+    @SerializedName("negativeButtonText") val negativeButtonText: String? = null
 )
 
 data class VerifiedInputApiDto(
@@ -387,8 +406,10 @@ data class VerifiedInputApiDto(
 data class ApiVerificationConfigDto(
     @SerializedName("endpoint") val endpoint: String? = null,
     @SerializedName("method") val method: String? = null,
+    @SerializedName("requestMapping") val requestMapping: String? = null,
     @SerializedName("successCondition") val successCondition: Map<String, Any>? = null,
-    @SerializedName("messages") val messages: Map<String, String>? = null
+    @SerializedName("messages") val messages: Map<String, String>? = null,
+    @SerializedName("showDialog") val showDialog: Boolean? = null
 )
 
 data class FormActionDto(

@@ -17,9 +17,11 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -324,6 +326,124 @@ fun DynamicNumberField(
     )
 
     LaunchedEffect(value) { onBlur() }
+}
+
+@Composable
+fun DynamicVerifiedInputField(
+    field: FormField,
+    value: Any?,
+    error: String?,
+    onValueChange: (String) -> Unit,
+    onBlur: () -> Unit,
+    onVerifyClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isEnabled: Boolean = true,
+    isVerified: Boolean = false
+) {
+    val textValue = when (value) {
+        null -> ""
+        is String -> value
+        else -> value.toString()
+    }
+    
+    val config = field.verifiedInputConfig
+    val inputConfig = config?.input
+    
+    // For API_VERIFICATION, use field config directly
+    val keyboardType = when (inputConfig?.keyboard ?: field.keyboard) {
+        "PHONE", "NUMBER" -> KeyboardType.Phone
+        "EMAIL" -> KeyboardType.Email
+        else -> KeyboardType.Text
+    }
+    
+    val maxLength = inputConfig?.maxLength ?: field.maxLength
+
+    OutlinedTextField(
+        value = textValue,
+        onValueChange = { newValue ->
+            val filtered = when (inputConfig?.dataType) {
+                "NUMBER" -> newValue.filter { it.isDigit() }
+                else -> newValue
+            }
+            
+            val finalValue = if (maxLength != null && filtered.length > maxLength) {
+                filtered.take(maxLength)
+            } else {
+                filtered
+            }
+            
+            onValueChange(finalValue)
+        },
+        modifier = modifier.fillMaxWidth(),
+        label = { Text(field.label + if (field.required) " *" else "") },
+        placeholder = { Text(field.placeholder ?: "") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        shape = RoundedCornerShape(10.dp),
+        isError = error != null,
+        enabled = isEnabled,
+        readOnly = field.readOnly, // Keep fields editable even after verification success
+        colors = TextFieldDefaults.colors(
+            // Use plain background for all states (no green background when verified)
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            errorIndicatorColor = Color(0xFFB00020)
+        ),
+        trailingIcon = {
+            when {
+                error != null -> {
+                    Icon(
+                        imageVector = Icons.Outlined.Info,
+                        contentDescription = "Error",
+                        tint = Color(0xFFB00020)
+                    )
+                }
+                isVerified -> {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = "Verified",
+                        tint = Color(0xFF16A34A) // Green check when verified
+                    )
+                }
+                else -> {
+                    // Blue tick icon for verification - show for VERIFIED_INPUT or API_VERIFICATION
+                    val showVerifyIcon = field.type == "VERIFIED_INPUT" || field.type == "API_VERIFICATION"
+                    // Blue tick is enabled if: field is enabled, not read-only, and has value
+                    // Validation will be checked on click
+                    val canVerify = isEnabled && !field.readOnly && textValue.isNotBlank()
+                    
+                    if (showVerifyIcon) {
+                        // Always show the icon, but disable it when field is empty or read-only
+                        // Validation will be checked when user clicks the icon
+                        IconButton(
+                            onClick = { 
+                                android.util.Log.d("DynamicVerifiedInputField", "Blue tick clicked for field: ${field.id}, type: ${field.type}, value: '$textValue', enabled: $isEnabled, readOnly: ${field.readOnly}")
+                                if (canVerify) {
+                                    android.util.Log.d("DynamicVerifiedInputField", "Calling onVerifyClick for field: ${field.id} - validation will be checked in handler")
+                                    onVerifyClick() // Validation will be checked in the handler
+                                } else {
+                                    android.util.Log.d("DynamicVerifiedInputField", "Cannot verify: isEnabled=$isEnabled, readOnly=${field.readOnly}, textValue.isBlank()=${textValue.isBlank()}")
+                                }
+                            },
+                            enabled = canVerify
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CheckCircle,
+                                contentDescription = "Verify",
+                                tint = if (canVerify) Color(0xFF2563EB) else Color(0xFF2563EB).copy(alpha = 0.4f) // Blue color, dimmed when disabled
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        supportingText = error?.let {
+            { Text(it, color = Color(0xFFB00020)) }
+        }
+    )
 }
 
 

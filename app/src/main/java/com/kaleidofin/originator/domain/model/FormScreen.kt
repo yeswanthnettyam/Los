@@ -72,7 +72,9 @@ data class FormField(
     val max: Int?,
     val dateMode: String?,
     val minDate: String?,
-    val maxDate: String?
+    val maxDate: String?,
+    val verifiedInputConfig: VerifiedInputConfig? = null,
+    val apiVerificationConfig: ApiVerificationConfig? = null
 )
 
 data class FieldDataSource(
@@ -146,4 +148,71 @@ data class SuccessAction(
     val updateField: String,
     val value: Any,
     val closeModal: Boolean
+)
+
+data class VerifiedInputConfig(
+    val input: VerifiedInputInput?,
+    val verification: VerifiedInputVerification?
+)
+
+data class VerifiedInputInput(
+    val dataType: String?,
+    val keyboard: String?,
+    val maxLength: Int?,
+    val min: Int?,
+    val max: Int?
+)
+
+data class VerifiedInputVerification(
+    val mode: String?,
+    val messages: Map<String, String>?,
+    val showDialog: Boolean?,
+    val otp: VerifiedInputOtp?,
+    val api: VerifiedInputApi?
+)
+
+data class VerifiedInputOtp(
+    val channel: String?,
+    val otpLength: Int?,
+    val resendIntervalSeconds: Int?,
+    val consent: VerifiedInputConsent?,
+    val api: VerifiedInputOtpApi?
+)
+
+data class VerifiedInputConsent(
+    val title: String?,
+    val subTitle: String?,
+    val message: String?,
+    val positiveButtonText: String?,
+    val negativeButtonText: String?
+)
+
+data class VerifiedInputOtpApi(
+    val sendOtp: VerifiedInputApiEndpoint?,
+    val verifyOtp: VerifiedInputApiEndpoint?
+)
+
+data class VerifiedInputApiEndpoint(
+    val endpoint: String?,
+    val method: String?
+)
+
+data class VerifiedInputApi(
+    val endpoint: String?,
+    val method: String?,
+    val successCondition: Map<String, Any>?
+)
+
+data class ApiVerificationConfig(
+    val endpoint: String?,
+    val method: String?,
+    val requestMapping: String?,
+    val successCondition: ApiVerificationSuccessCondition?,
+    val messages: Map<String, String>?,
+    val showDialog: Boolean?
+)
+
+data class ApiVerificationSuccessCondition(
+    val field: String?,
+    val equals: String?
 )

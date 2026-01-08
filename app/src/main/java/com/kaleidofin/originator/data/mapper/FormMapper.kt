@@ -88,7 +88,9 @@ fun FieldDto.toDomain(): FormField {
         max = maxInt,
         dateMode = actualDateMode,
         minDate = actualMinDate,
-        maxDate = actualMaxDate
+        maxDate = actualMaxDate,
+        verifiedInputConfig = verifiedInputConfig?.toDomain(),
+        apiVerificationConfig = apiVerificationConfig?.toDomain()
     )
 }
 
@@ -189,5 +191,96 @@ fun SuccessActionDto.toDomain(): SuccessAction {
         updateField = updateField,
         value = value,
         closeModal = closeModal
+    )
+}
+
+fun VerifiedInputConfigDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputConfig {
+    return com.kaleidofin.originator.domain.model.VerifiedInputConfig(
+        input = input?.toDomain(),
+        verification = verification?.toDomain()
+    )
+}
+
+fun VerifiedInputInputDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputInput {
+    return com.kaleidofin.originator.domain.model.VerifiedInputInput(
+        dataType = dataType,
+        keyboard = keyboard,
+        maxLength = maxLength?.toIntOrNull(),
+        min = min?.toIntOrNull(),
+        max = max?.toIntOrNull()
+    )
+}
+
+fun VerifiedInputVerificationDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputVerification {
+    return com.kaleidofin.originator.domain.model.VerifiedInputVerification(
+        mode = mode,
+        messages = messages,
+        showDialog = showDialog,
+        otp = otp?.toDomain(),
+        api = api?.toDomain()
+    )
+}
+
+fun VerifiedInputOtpDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputOtp {
+    val apiMap = api ?: emptyMap()
+    return com.kaleidofin.originator.domain.model.VerifiedInputOtp(
+        channel = channel,
+        otpLength = otpLength?.toIntOrNull(),
+        resendIntervalSeconds = resendIntervalSeconds?.toIntOrNull(),
+        consent = consent?.toDomain(),
+        api = if (apiMap.isNotEmpty()) {
+            com.kaleidofin.originator.domain.model.VerifiedInputOtpApi(
+                sendOtp = (apiMap["sendOtp"] as? Map<*, *>)?.let { map ->
+                    com.kaleidofin.originator.domain.model.VerifiedInputApiEndpoint(
+                        endpoint = map["endpoint"] as? String,
+                        method = map["method"] as? String
+                    )
+                },
+                verifyOtp = (apiMap["verifyOtp"] as? Map<*, *>)?.let { map ->
+                    com.kaleidofin.originator.domain.model.VerifiedInputApiEndpoint(
+                        endpoint = map["endpoint"] as? String,
+                        method = map["method"] as? String
+                    )
+                }
+            )
+        } else {
+            null
+        }
+    )
+}
+
+fun VerifiedInputConsentDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputConsent {
+    return com.kaleidofin.originator.domain.model.VerifiedInputConsent(
+        title = title,
+        subTitle = subTitle,
+        message = message,
+        positiveButtonText = positiveButtonText,
+        negativeButtonText = negativeButtonText
+    )
+}
+
+fun VerifiedInputApiDto.toDomain(): com.kaleidofin.originator.domain.model.VerifiedInputApi {
+    return com.kaleidofin.originator.domain.model.VerifiedInputApi(
+        endpoint = endpoint,
+        method = method,
+        successCondition = successCondition
+    )
+}
+
+fun ApiVerificationConfigDto.toDomain(): com.kaleidofin.originator.domain.model.ApiVerificationConfig {
+    return com.kaleidofin.originator.domain.model.ApiVerificationConfig(
+        endpoint = endpoint,
+        method = method,
+        requestMapping = requestMapping,
+        successCondition = if (successCondition is Map<*, *>) {
+            com.kaleidofin.originator.domain.model.ApiVerificationSuccessCondition(
+                field = successCondition["field"] as? String,
+                equals = successCondition["equals"] as? String
+            )
+        } else {
+            null
+        },
+        messages = messages,
+        showDialog = showDialog
     )
 }

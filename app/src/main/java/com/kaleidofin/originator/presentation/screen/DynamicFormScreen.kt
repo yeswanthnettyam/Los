@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.activity.compose.BackHandler
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -56,6 +57,57 @@ fun DynamicFormScreen(
     var datePickerMode by remember { mutableStateOf<String?>(null) }
     var datePickerMinDate by remember { mutableStateOf<String?>(null) }
     var datePickerMaxDate by remember { mutableStateOf<String?>(null) }
+
+    // Verified input state
+    var showConsentDialog by remember { mutableStateOf(false) }
+    var showOtpDialog by remember { mutableStateOf(false) }
+    var verifyingFieldId by remember { mutableStateOf<String?>(null) }
+    var verifyingFieldValue by remember { mutableStateOf<String?>(null) }
+    
+    // Generic Verification Result Dialog state (for all verification types)
+    var showVerificationResultDialog by remember { mutableStateOf(false) }
+    var verificationResultMessage by remember { mutableStateOf<String?>(null) }
+    var verificationResultIsSuccess by remember { mutableStateOf(false) }
+    var verificationResultShowDialog by remember { mutableStateOf(true) } // Default to show dialog
+    
+    // Snackbar messages for verification (fallback when showDialog is false)
+    var verificationErrorMessage by remember { mutableStateOf<String?>(null) }
+    var verificationSuccessMessage by remember { mutableStateOf<String?>(null) }
+    
+    // Show snackbar messages (only when dialog is not shown)
+    LaunchedEffect(verificationErrorMessage) {
+        verificationErrorMessage?.let {
+            if (!verificationResultShowDialog) {
+                snackbarHostState.showSnackbar(it)
+            }
+            verificationErrorMessage = null
+        }
+    }
+    
+    LaunchedEffect(verificationSuccessMessage) {
+        verificationSuccessMessage?.let {
+            if (!verificationResultShowDialog) {
+                snackbarHostState.showSnackbar(it)
+            }
+            verificationSuccessMessage = null
+        }
+    }
+    
+    // Helper function to show verification result (success or failure)
+    val showVerificationResult: (String, Boolean, Boolean) -> Unit = { message, isSuccess, showDialog ->
+        if (showDialog) {
+            verificationResultMessage = message
+            verificationResultIsSuccess = isSuccess
+            verificationResultShowDialog = true
+            showVerificationResultDialog = true
+        } else {
+            if (isSuccess) {
+                verificationSuccessMessage = message
+            } else {
+                verificationErrorMessage = message
+            }
+        }
+    }
 
     LaunchedEffect(target) {
         // Check if this is initial load (flow stack is empty)
@@ -231,6 +283,89 @@ fun DynamicFormScreen(
                                         datePickerMinDate = field.minDate
                                         datePickerMaxDate = field.maxDate
                                         showDatePicker = true
+                                    },
+                                    onVerifyClick = { fieldIdForVerify, fieldValue ->
+                                        android.util.Log.d("DynamicFormScreen", "onVerifyClick called for fieldId: $fieldIdForVerify, fieldValue: $fieldValue")
+                                        
+                                        // Find the field to get config - search in all sections and subsections
+                                        val allFields = formScreen?.sections?.flatMap { it.fields }
+                                            ?.plus(formScreen.sections.flatMap { it.subSections.flatMap { sub -> sub.fields } })
+                                        val fieldToVerify = allFields?.find { 
+                                            it.id == fieldIdForVerify
+                                        }
+                                        
+                                        android.util.Log.d("DynamicFormScreen", "Found field: ${fieldToVerify?.id}, type: ${fieldToVerify?.type}")
+                                        
+                                        // Get the actual fieldKey (with section index if applicable) for this field
+                                        val actualFieldKey = if (section.repeatable) "${fieldIdForVerify}_$index" else fieldIdForVerify
+                                        
+                                        when (fieldToVerify?.type) {
+                                            "VERIFIED_INPUT" -> {
+                                                android.util.Log.d("DynamicFormScreen", "VERIFIED_INPUT field found, checking consent config")
+                                                // For VERIFIED_INPUT: Show consent dialog
+                                                val consent = fieldToVerify.verifiedInputConfig?.verification?.otp?.consent
+                                                android.util.Log.d("DynamicFormScreen", "Consent config: $consent")
+                                                if (consent != null) {
+                                                    // Clear any previous verification error for this field
+                                                    viewModel.clearFieldError(actualFieldKey)
+                                                    
+                                                    // Store field info for consent dialog (use actualFieldKey for verification status)
+                                                    verifyingFieldId = actualFieldKey
+                                                    verifyingFieldValue = fieldValue
+                                                    showConsentDialog = true
+                                                    android.util.Log.d("DynamicFormScreen", "Opening consent dialog for field: ${fieldToVerify.id}")
+                                                } else {
+                                                    android.util.Log.d("DynamicFormScreen", "No consent config found for field: ${fieldToVerify.id}")
+                                                }
+                                            }
+                                            "API_VERIFICATION" -> {
+                                                android.util.Log.d("DynamicFormScreen", "API_VERIFICATION field found - calling API directly")
+                                                // For API_VERIFICATION: Call API directly (NO CONSENT DIALOG)
+                                                val apiConfig = fieldToVerify.apiVerificationConfig
+                                                if (apiConfig != null) {
+                                                    verifyingFieldId = actualFieldKey
+                                                    verifyingFieldValue = fieldValue
+                                                    
+                                                    // Clear any previous verification error for this field
+                                                    viewModel.clearFieldError(actualFieldKey)
+                                                    
+                                                    // Call API verification
+                                                    viewModel.verifyApi(
+                                                        endpoint = apiConfig.endpoint ?: "",
+                                                        method = apiConfig.method ?: "GET",
+                                                        requestMapping = apiConfig.requestMapping,
+                                                        fieldValue = fieldValue,
+                                                        fieldId = fieldToVerify.id,
+                                                        fieldKey = actualFieldKey, // Pass fieldKey to set error on failure
+                                                        successCondition = apiConfig.successCondition,
+                                                        onSuccess = {
+                                                            // Show success message
+                                                            val successMsg = apiConfig.messages?.get("success") ?: "Verification successful"
+                                                            // Mark as verified (use actualFieldKey to handle section indices)
+                                                            viewModel.updateFieldValue("${actualFieldKey}_verified", true, null)
+                                                            
+                                                            // Show result using generic dialog (can be dialog or snackbar based on config)
+                                                            showVerificationResult(successMsg, true, apiConfig.showDialog == true)
+                                                        },
+                                                        onFailure = { error ->
+                                                            // Show failure message below the field
+                                                            val failureMsg = apiConfig.messages?.get("failure") ?: error
+                                                            viewModel.setFieldError(actualFieldKey, failureMsg)
+                                                            
+                                                            // Also show in dialog/snackbar if showDialog is true
+                                                            if (apiConfig.showDialog == true) {
+                                                                showVerificationResult(failureMsg, false, true)
+                                                            }
+                                                        }
+                                                    )
+                                                } else {
+                                                    android.util.Log.d("DynamicFormScreen", "No apiVerificationConfig found for field: ${fieldToVerify.id}")
+                                                }
+                                            }
+                                            else -> {
+                                                android.util.Log.d("DynamicFormScreen", "Field type not supported for verification: ${fieldToVerify?.type}")
+                                            }
+                                        }
                                     }
                                 )
                                 Spacer(Modifier.height(16.dp))
@@ -301,7 +436,6 @@ fun DynamicFormScreen(
                             datePickerMinDate = null
                             datePickerMaxDate = null
                         },
-
                                 dateMode = datePickerMode,
                         constraints = datePickerConstraints,
                         minDate = datePickerMinDate,
@@ -313,6 +447,158 @@ fun DynamicFormScreen(
                             datePickerMode = null
                             datePickerMinDate = null
                             datePickerMaxDate = null
+                        }
+                    )
+                }
+                
+                // Consent dialog for verified input
+                if (showConsentDialog && verifyingFieldId != null && verifyingFieldValue != null) {
+                    val fieldToVerify = formScreen?.sections?.flatMap { it.fields }
+                        ?.plus(formScreen.sections.flatMap { it.subSections.flatMap { sub -> sub.fields } })
+                        ?.find { it.id == verifyingFieldId }
+                    
+                    fieldToVerify?.verifiedInputConfig?.verification?.otp?.consent?.let { consent ->
+                        // Replace placeholder in subtitle with actual phone number
+                        val subTitleWithPhone = consent.subTitle?.replace(
+                            "phone number ",
+                            "phone number $verifyingFieldValue"
+                        ) ?: "Please enter the ${fieldToVerify.verifiedInputConfig?.verification?.otp?.otpLength ?: 6} digit consent code sent to $verifyingFieldValue"
+                        
+                        ConsentDialog(
+                            title = consent.title ?: "User Agreement",
+                            subTitle = subTitleWithPhone,
+                            message = consent.message ?: "",
+                            positiveButtonText = consent.positiveButtonText ?: "Agree & Proceed",
+                            negativeButtonText = consent.negativeButtonText ?: "Cancel",
+                            onPositiveClick = {
+                                showConsentDialog = false
+                                // Send OTP when user agrees
+                                fieldToVerify.verifiedInputConfig?.verification?.otp?.api?.sendOtp?.let { sendOtpConfig ->
+                                    viewModel.sendOtp(
+                                        endpoint = sendOtpConfig.endpoint ?: "/api/otp/send",
+                                        method = sendOtpConfig.method ?: "POST",
+                                        phoneNumber = verifyingFieldValue ?: "",
+                                        onSuccess = {
+                                            showOtpDialog = true
+                                        },
+                                        onFailure = { error ->
+                                            // Show error message
+                                            verificationErrorMessage = error
+                                        }
+                                    )
+                                } ?: run {
+                                    // If no API config, just show OTP dialog
+                                    showOtpDialog = true
+                                }
+                            },
+                            onNegativeClick = {
+                                showConsentDialog = false
+                                verifyingFieldId = null
+                                verifyingFieldValue = null
+                            }
+                        )
+                    }
+                }
+                
+                // OTP dialog for verified input
+                if (showOtpDialog && verifyingFieldId != null && verifyingFieldValue != null) {
+                    val fieldToVerify = formScreen?.sections?.flatMap { it.fields }
+                        ?.plus(formScreen.sections.flatMap { it.subSections.flatMap { sub -> sub.fields } })
+                        ?.find { it.id == verifyingFieldId }
+                    
+                    fieldToVerify?.verifiedInputConfig?.verification?.otp?.let { otpConfig ->
+                        // Get subtitle from consent config with phone number
+                        val subTitleWithPhone = otpConfig.consent?.subTitle?.replace(
+                            "phone number ",
+                            "phone number ${verifyingFieldValue}"
+                        ) ?: "Please enter the ${otpConfig.otpLength ?: 6} digit code sent to ${verifyingFieldValue}"
+                        
+                        OtpDialog(
+                            phoneNumber = verifyingFieldValue ?: "",
+                            subTitle = subTitleWithPhone,
+                            otpLength = otpConfig.otpLength ?: 6,
+                            resendIntervalSeconds = otpConfig.resendIntervalSeconds ?: 60,
+                            onVerify = { otp, onComplete ->
+                                // Clear any previous verification error for this field
+                                viewModel.clearFieldError(verifyingFieldId ?: "")
+                                
+                                // Call API to verify OTP
+                                otpConfig.api?.verifyOtp?.let { verifyOtpConfig ->
+                                    viewModel.verifyOtp(
+                                        endpoint = verifyOtpConfig.endpoint ?: "/api/otp/verify",
+                                        method = verifyOtpConfig.method ?: "GET",
+                                        phoneNumber = verifyingFieldValue ?: "",
+                                        otp = otp,
+                                        fieldId = verifyingFieldId ?: "",
+                                        fieldKey = verifyingFieldId ?: "", // Pass fieldKey to set error on failure
+                                        onSuccess = {
+                                            showOtpDialog = false
+                                            verifyingFieldId = null
+                                            verifyingFieldValue = null
+                                            // Show success message if available
+                                            val successMsg = fieldToVerify.verifiedInputConfig?.verification?.messages?.get("success")
+                                            val showDialog = fieldToVerify.verifiedInputConfig?.verification?.showDialog == true
+                                            if (!successMsg.isNullOrEmpty()) {
+                                                showVerificationResult(successMsg, true, showDialog)
+                                            }
+                                            onComplete(true)
+                                        },
+                                        onFailure = { error ->
+                                            // Show failure message below the field
+                                            val failureMsg = fieldToVerify.verifiedInputConfig?.verification?.messages?.get("failure") ?: error
+                                            viewModel.setFieldError(verifyingFieldId ?: "", failureMsg)
+                                            
+                                            // Also show in dialog/snackbar if showDialog is true
+                                            val showDialog = fieldToVerify.verifiedInputConfig?.verification?.showDialog == true
+                                            if (showDialog) {
+                                                showVerificationResult(failureMsg, false, true)
+                                            }
+                                            onComplete(false)
+                                        }
+                                    )
+                                } ?: run {
+                                    // If no API config, just mark as verified (verifyingFieldId already includes section index if applicable)
+                                    viewModel.updateFieldValue("${verifyingFieldId}_verified", true, null)
+                                    showOtpDialog = false
+                                    verifyingFieldId = null
+                                    verifyingFieldValue = null
+                                    onComplete(true)
+                                }
+                            },
+                            onDismiss = {
+                                showOtpDialog = false
+                                verifyingFieldId = null
+                                verifyingFieldValue = null
+                            },
+                            onResend = {
+                                // Call API to resend OTP
+                                otpConfig.api?.sendOtp?.let { sendOtpConfig ->
+                                    viewModel.sendOtp(
+                                        endpoint = sendOtpConfig.endpoint ?: "/api/otp/send",
+                                        method = sendOtpConfig.method ?: "POST",
+                                        phoneNumber = verifyingFieldValue ?: "",
+                                        onSuccess = {
+                                            // OTP sent successfully, timer will reset automatically
+                                        },
+                                        onFailure = { error ->
+                                            verificationErrorMessage = error
+                                        }
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
+                
+                // Generic Verification Result Dialog (for all verification fields)
+                if (showVerificationResultDialog && verificationResultMessage != null) {
+                    VerificationResultDialog(
+                        message = verificationResultMessage ?: "",
+                        isSuccess = verificationResultIsSuccess,
+                        onDismiss = {
+                            showVerificationResultDialog = false
+                            verificationResultMessage = null
+                            // Don't clear verifyingFieldId/verifyingFieldValue here as they might still be needed
                         }
                     )
                 }
@@ -333,7 +619,8 @@ private fun FormSection(
     onValueChange: (String, Any) -> Unit,
     onBlur: (String) -> Unit,
     onTriggerVerification: (String, Any) -> Unit = { _, _ -> }, // New callback for verification
-    onDateClick: (String, com.kaleidofin.originator.domain.model.FormField) -> Unit // Callback for date picker
+    onDateClick: (String, com.kaleidofin.originator.domain.model.FormField) -> Unit, // Callback for date picker
+    onVerifyClick: (String, String) -> Unit = { _, _ -> } // Callback for verified input verification
 ) {
     var isExpanded by remember { mutableStateOf(section.expanded) }
     val instanceCount = if (section.repeatable) {
@@ -341,7 +628,7 @@ private fun FormSection(
     } else {
         1
     }
-    val canAdd = section.repeatable && (section.maxInstances == null || instanceCount < section.maxInstances)
+    val canAdd = section.repeatable && (section.maxInstances?.let { instanceCount < it } ?: true)
     val canRemove = section.repeatable && instanceCount > section.minInstances
     
     Card(
@@ -362,7 +649,14 @@ private fun FormSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = section.instanceLabel?.replace("{{index}}", "${(sectionIndex ?: 0) + 1}") ?: section.title,
+                    // For subsections, always show title. For main sections, show instanceLabel if available
+                    text = if (section.subSectionOf != null) {
+                        // Subsection: always use title
+                        section.title
+                    } else {
+                        // Main section: use instanceLabel if available, otherwise title
+                        section.instanceLabel?.replace("{{index}}", "${(sectionIndex ?: 0) + 1}") ?: section.title
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -441,6 +735,7 @@ private fun FormSection(
                     fieldKey = fieldKey,
                     focusRequesters = focusRequesters,
                     uiState = uiState,
+                    viewModel = viewModel,
                     isEnabled = isFieldEnabled,
                     onValueChange = { newValue -> 
                         // Convert Any to String if needed, then pass to parent
@@ -454,7 +749,10 @@ private fun FormSection(
                         onTriggerVerification(field.id, stringValue)
                     },
                     onBlur = { onBlur(field.id) },
-                    onDateClick = onDateClick
+                        onDateClick = onDateClick,
+                        onVerifyClick = { fieldKeyForVerify, fieldValue ->
+                            onVerifyClick(fieldKeyForVerify, fieldValue)
+                        }
                 )
 
                     Spacer(Modifier.height(8.dp))
@@ -504,7 +802,8 @@ private fun FormSection(
                             },
                             onDateClick = { fieldKey, field ->
                                 onDateClick(fieldKey, field)
-                            }
+                            },
+                            onVerifyClick = onVerifyClick
                         )
                     }
                 }
@@ -512,6 +811,7 @@ private fun FormSection(
         }
     }
 }
+
 @Composable
 private fun DynamicFormFieldRenderer(
     field: FormField,
@@ -520,10 +820,12 @@ private fun DynamicFormFieldRenderer(
     fieldKey: String,
     focusRequesters: MutableMap<String, FocusRequester>,
     uiState: DynamicFormUiState,
+    viewModel: DynamicFormViewModel, // Add viewModel parameter
     isEnabled: Boolean = true,
     onValueChange: (Any) -> Unit,
     onBlur: () -> Unit,
-    onDateClick: (String, com.kaleidofin.originator.domain.model.FormField) -> Unit = { _, _ -> }
+    onDateClick: (String, com.kaleidofin.originator.domain.model.FormField) -> Unit = { _, _ -> },
+    onVerifyClick: (String, String) -> Unit = { _, _ -> }
 ) {
     val focusRequester = remember { FocusRequester() }
 
@@ -531,12 +833,94 @@ private fun DynamicFormFieldRenderer(
         focusRequesters[fieldKey] = focusRequester
     }
     
-    // Check verification status for this field
-    val isVerified = field.verification?.let { verification ->
-        uiState.getFieldValue(verification.statusField) as? Boolean ?: false
-    } ?: false
+    // Check verification status for this field (for both VERIFIED_INPUT and API_VERIFICATION)
+    // Use fieldKey to handle section indices correctly (e.g., "fieldId_0_verified")
+    val isVerified = when {
+        field.verifiedInputConfig != null -> {
+            uiState.getFieldValue("${fieldKey}_verified") as? Boolean ?: false
+        }
+        field.apiVerificationConfig != null -> {
+            uiState.getFieldValue("${fieldKey}_verified") as? Boolean ?: false
+        }
+        field.verification != null -> {
+            uiState.getFieldValue(field.verification.statusField) as? Boolean ?: false
+        }
+        else -> false
+    }
+
+    // Extract section index from fieldKey (e.g., "fieldId_0" -> 0, "fieldId" -> null)
+    val sectionIndex = if (fieldKey.contains("_")) {
+        val lastPart = fieldKey.substringAfterLast("_")
+        if (lastPart.all { it.isDigit() }) {
+            lastPart.toIntOrNull()
+        } else {
+            null
+        }
+    } else {
+        null
+    }
 
     when (field.type) {
+        "VERIFIED_INPUT" -> {
+            DynamicVerifiedInputField(
+                field = field,
+                value = value,
+                error = error,
+                modifier = Modifier.focusRequester(focusRequester),
+                isEnabled = isEnabled,
+                isVerified = isVerified,
+                onValueChange = { newValue ->
+                    onValueChange(newValue as Any)
+                },
+                onBlur = onBlur,
+                onVerifyClick = {
+                    val fieldValue = value?.toString() ?: ""
+                    // Validate field before allowing verification
+                    val validationError = viewModel.validateSingleField(field, fieldValue, sectionIndex)
+                    if (validationError != null) {
+                        // Show error message below field if validation fails
+                        viewModel.setFieldError(fieldKey, validationError)
+                        android.util.Log.d("DynamicFormScreen", "Validation failed for field ${field.id}: $validationError")
+                    } else {
+                        // Clear any existing error and proceed with verification flow
+                        viewModel.clearFieldError(fieldKey)
+                        android.util.Log.d("DynamicFormScreen", "Validation passed for field ${field.id}, proceeding with verification")
+                        // Pass field.id instead of fieldKey to make lookup easier
+                        onVerifyClick(field.id, fieldValue)
+                    }
+                }
+            )
+        }
+        "API_VERIFICATION" -> {
+            DynamicVerifiedInputField(
+                field = field,
+                value = value,
+                error = error,
+                modifier = Modifier.focusRequester(focusRequester),
+                isEnabled = isEnabled,
+                isVerified = isVerified,
+                onValueChange = { newValue ->
+                    onValueChange(newValue as Any)
+                },
+                onBlur = onBlur,
+                onVerifyClick = {
+                    val fieldValue = value?.toString() ?: ""
+                    // Validate field before allowing verification
+                    val validationError = viewModel.validateSingleField(field, fieldValue, sectionIndex)
+                    if (validationError != null) {
+                        // Show error message below field if validation fails
+                        viewModel.setFieldError(fieldKey, validationError)
+                        android.util.Log.d("DynamicFormScreen", "Validation failed for field ${field.id}: $validationError")
+                    } else {
+                        // Clear any existing error and proceed with verification flow
+                        viewModel.clearFieldError(fieldKey)
+                        android.util.Log.d("DynamicFormScreen", "Validation passed for field ${field.id}, proceeding with API verification")
+                        // Pass field.id instead of fieldKey to make lookup easier
+                        onVerifyClick(field.id, fieldValue)
+                    }
+                }
+            )
+        }
         "DROPDOWN" -> {
             // Get options based on dataSource type
             val options = when (field.dataSource?.type) {
@@ -638,5 +1022,182 @@ private fun VerificationModal(
     )
 }
 
+@Composable
+private fun ConsentDialog(
+    title: String,
+    subTitle: String?,
+    message: String,
+    positiveButtonText: String,
+    negativeButtonText: String,
+    onPositiveClick: () -> Unit,
+    onNegativeClick: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onNegativeClick,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!subTitle.isNullOrEmpty()) {
+                    Text(
+                        text = subTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        },
+        confirmButton = {
+            PrimaryButton(
+                text = positiveButtonText,
+                onClick = onPositiveClick,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onNegativeClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(negativeButtonText)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
+private fun OtpDialog(
+    phoneNumber: String,
+    subTitle: String,
+    otpLength: Int,
+    resendIntervalSeconds: Int,
+    onVerify: (String, (Boolean) -> Unit) -> Unit, // Added callback to handle completion
+    onDismiss: () -> Unit,
+    onResend: () -> Unit
+) {
+    var otpValue by remember { mutableStateOf("") }
+    var timeRemaining by remember { mutableStateOf(resendIntervalSeconds) }
+    var isVerifying by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(Unit) {
+        // Start countdown when dialog opens
+        timeRemaining = resendIntervalSeconds
+    }
+    
+    LaunchedEffect(timeRemaining) {
+        if (timeRemaining > 0) {
+            kotlinx.coroutines.delay(1000)
+            timeRemaining--
+        }
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Enter OTP",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = subTitle,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                
+                OutlinedTextField(
+                    value = otpValue,
+                    onValueChange = { newValue ->
+                        if (newValue.all { it.isDigit() } && newValue.length <= otpLength) {
+                            otpValue = newValue
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("OTP") },
+                    placeholder = { Text("Enter $otpLength digit code") },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
+                    singleLine = true,
+                    enabled = !isVerifying,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                )
+                
+                if (timeRemaining > 0) {
+                    Text(
+                        text = "Resend OTP in ${timeRemaining}s",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                } else {
+                    TextButton(
+                        onClick = {
+                            timeRemaining = resendIntervalSeconds
+                            onResend()
+                        },
+                        enabled = !isVerifying
+                    ) {
+                        Text("Resend OTP")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            PrimaryButton(
+                text = "Verify",
+                onClick = {
+                    if (otpValue.length == otpLength && !isVerifying) {
+                        isVerifying = true
+                        onVerify(otpValue) { success ->
+                            isVerifying = false
+                            if (!success) {
+                                // If verification failed, keep dialog open
+                                // Don't clear OTP, just reset verifying state
+                            }
+                        }
+                    }
+                },
+                enabled = otpValue.length == otpLength && !isVerifying,
+                isLoading = isVerifying,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isVerifying,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Cancel")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
 
 

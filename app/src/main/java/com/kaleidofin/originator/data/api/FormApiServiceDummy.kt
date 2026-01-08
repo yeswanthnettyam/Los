@@ -166,6 +166,7 @@ class FormApiServiceDummy @Inject constructor(
             "repeatable": false,
             "minInstances": 1,
             "maxInstances": 5,
+            "collapsible": true,
             "instanceLabel": "Instance",
             "order": 1,
             "parentSectionId": "section_1",
@@ -630,7 +631,7 @@ class FormApiServiceDummy @Inject constructor(
           {
             "id": "subsection_1767693176103",
             "title": "Address Details",
-            "repeatable": false,
+            "repeatable": true,
             "minInstances": 1,
             "maxInstances": 5,
             "instanceLabel": "Instance",
