@@ -51,6 +51,7 @@ data class FormUiDto(
                             type = primitive.asString,
                             submitButtonText = "Submit",
                             stickyFooter = false,
+                            allowBackNavigation = true,
                             enableSubmitWhen = emptyList()
                         )
                     } else {
@@ -59,6 +60,7 @@ data class FormUiDto(
                             type = "FORM",
                             submitButtonText = "Submit",
                             stickyFooter = false,
+                            allowBackNavigation = true,
                             enableSubmitWhen = emptyList()
                         )
                     }
@@ -70,6 +72,7 @@ data class FormUiDto(
                         type = obj.get("type")?.asString ?: "FORM",
                         submitButtonText = obj.get("submitButtonText")?.asString ?: "Submit",
                         stickyFooter = obj.get("stickyFooter")?.asBoolean ?: false,
+                        allowBackNavigation = obj.get("allowBackNavigation")?.asBoolean ?: true,
                         enableSubmitWhen = obj.get("enableSubmitWhen")?.asJsonArray?.mapNotNull { element ->
                             if (element.isJsonObject) {
                                 val condObj = element.asJsonObject
@@ -103,6 +106,7 @@ data class FormUiDto(
                         type = "FORM",
                         submitButtonText = "Submit",
                         stickyFooter = false,
+                        allowBackNavigation = true,
                         enableSubmitWhen = emptyList()
                     )
                 }
@@ -114,7 +118,8 @@ data class FormLayoutDto(
     @SerializedName("type") val type: String,
     @SerializedName("submitButtonText") val submitButtonText: String,
     @SerializedName("stickyFooter") val stickyFooter: Boolean,
-    @SerializedName("enableSubmitWhen") val enableSubmitWhen: List<SubmitConditionDto>? = emptyList()
+    @SerializedName("enableSubmitWhen") val enableSubmitWhen: List<SubmitConditionDto>? = emptyList(),
+    @SerializedName("allowBackNavigation") val allowBackNavigation: Boolean? = true // Default to true for backward compatibility
 )
 
 data class SubmitConditionDto(
@@ -478,3 +483,44 @@ data class FormValidationRuleDto(
     @SerializedName("pattern") val pattern: String? = null,
     @SerializedName("executionTarget") val executionTarget: String? = null
 )
+
+// Flow Engine API DTOs - All navigation APIs return flowId, currentScreenId, and full screenConfig
+data class FlowResponseDto(
+    @SerializedName("flowId") val flowId: String,
+    @SerializedName("currentScreenId") val currentScreenId: String,
+    @SerializedName("screenConfig") val screenConfig: FormScreenDto
+)
+
+// Flow Start API
+data class FlowStartRequestDto(
+    @SerializedName("applicationId") val applicationId: String,
+    @SerializedName("flowType") val flowType: String? = null // Optional: e.g., "APPLICANT_ONBOARDING"
+)
+
+// Flow Next API
+data class FlowNextRequestDto(
+    @SerializedName("applicationId") val applicationId: String,
+    @SerializedName("currentScreenId") val currentScreenId: String,
+    @SerializedName("formData") val formData: Map<String, Any> // Unwrapped form data
+)
+
+// Flow Back API
+data class FlowBackRequestDto(
+    @SerializedName("applicationId") val applicationId: String,
+    @SerializedName("currentScreenId") val currentScreenId: String
+)
+
+// Legacy: Keep for backward compatibility but use FlowResponseDto for new code
+@Deprecated("Use FlowResponseDto instead", ReplaceWith("FlowResponseDto"))
+data class BackNavigationResponseDto(
+    @SerializedName("screenId") val screenId: String,
+    @SerializedName("screenConfig") val screenConfig: FormScreenDto
+) {
+    fun toFlowResponse(flowId: String): FlowResponseDto {
+        return FlowResponseDto(
+            flowId = flowId,
+            currentScreenId = screenId,
+            screenConfig = screenConfig
+        )
+    }
+}

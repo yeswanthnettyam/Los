@@ -1,7 +1,7 @@
 package com.kaleidofin.originator.data.api
 
 import com.google.gson.Gson
-import com.kaleidofin.originator.data.dto.FormScreenDto
+import com.kaleidofin.originator.data.dto.*
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 
@@ -1372,5 +1372,60 @@ class FormApiServiceDummy @Inject constructor(
         )
 
         return mapOf(dataSource to (masterDataMap[dataSource] ?: ""))
+    }
+    
+    // Flow Engine APIs - All return flowId, currentScreenId, and full screenConfig
+    override suspend fun startFlow(request: FlowStartRequestDto): FlowResponseDto {
+        delay(500) // Simulate network delay
+        
+        // Determine initial screen based on flowType or use default
+        val initialScreenId = request.flowType ?: "APPLICANT_IDENTITY"
+        val screenConfig = getFormConfiguration(initialScreenId)
+        
+        return FlowResponseDto(
+            flowId = "applicant_onboarding_flow", // Example flow ID
+            currentScreenId = screenConfig.screenId,
+            screenConfig = screenConfig
+        )
+    }
+    
+    override suspend fun navigateNext(request: FlowNextRequestDto): FlowResponseDto {
+        delay(500) // Simulate network delay
+        
+        // Determine next screen based on form data and current screen
+        // In real implementation, backend Flow Engine would evaluate conditions
+        val nextScreenId = when (request.currentScreenId) {
+            "APPLICANT_IDENTITY", "applicant_identity_details" -> "APPLICANT_BUSINESS_DETAILS"
+            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY" // Loop for testing
+            else -> "APPLICANT_IDENTITY" // Default fallback
+        }
+        
+        val screenConfig = getFormConfiguration(nextScreenId)
+        
+        return FlowResponseDto(
+            flowId = "applicant_onboarding_flow", // Example flow ID
+            currentScreenId = screenConfig.screenId,
+            screenConfig = screenConfig
+        )
+    }
+    
+    override suspend fun navigateBack(request: FlowBackRequestDto): FlowResponseDto {
+        delay(500) // Simulate network delay
+        
+        // Simple back navigation logic for dummy implementation
+        // In real implementation, backend Flow Engine would determine the previous screen
+        val previousScreenId = when (request.currentScreenId) {
+            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY"
+            else -> "APPLICANT_IDENTITY" // Default fallback
+        }
+        
+        // Get the previous screen configuration
+        val previousScreenConfig = getFormConfiguration(previousScreenId)
+        
+        return FlowResponseDto(
+            flowId = "applicant_onboarding_flow", // Example flow ID
+            currentScreenId = previousScreenConfig.screenId,
+            screenConfig = previousScreenConfig
+        )
     }
 }

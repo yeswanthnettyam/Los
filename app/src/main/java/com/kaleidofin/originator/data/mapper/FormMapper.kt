@@ -22,7 +22,8 @@ fun FormLayoutDto.toDomain(): FormLayout {
         type = type,
         submitButtonText = submitButtonText,
         stickyFooter = stickyFooter,
-        enableSubmitWhen = enableSubmitWhen?.map { it.toDomain() } ?: emptyList()
+        enableSubmitWhen = enableSubmitWhen?.map { it.toDomain() } ?: emptyList(),
+        allowBackNavigation = allowBackNavigation ?: true
     )
 }
 

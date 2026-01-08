@@ -16,7 +16,8 @@ data class FormLayout(
     val type: String,
     val submitButtonText: String,
     val stickyFooter: Boolean,
-    val enableSubmitWhen: List<SubmitCondition>
+    val enableSubmitWhen: List<SubmitCondition>,
+    val allowBackNavigation: Boolean = true // Default to true for backward compatibility
 )
 
 data class SubmitCondition(

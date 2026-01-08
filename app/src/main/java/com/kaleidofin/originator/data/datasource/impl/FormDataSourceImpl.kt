@@ -3,12 +3,41 @@ package com.kaleidofin.originator.data.datasource.impl
 import com.kaleidofin.originator.data.api.FormApiService
 import com.kaleidofin.originator.data.api.FormApiServiceDummy
 import com.kaleidofin.originator.data.datasource.FormDataSource
-import com.kaleidofin.originator.data.dto.FormScreenDto
+import com.kaleidofin.originator.data.dto.*
 import javax.inject.Inject
 
 class FormDataSourceImpl @Inject constructor(
     private val formApiService: FormApiService
 ) : FormDataSource {
+    override suspend fun startFlow(applicationId: String, flowType: String?): FlowResponseDto {
+        return formApiService.startFlow(
+            FlowStartRequestDto(
+                applicationId = applicationId,
+                flowType = flowType
+            )
+        )
+    }
+    
+    override suspend fun navigateNext(applicationId: String, currentScreenId: String, formData: Map<String, Any>): FlowResponseDto {
+        return formApiService.navigateNext(
+            FlowNextRequestDto(
+                applicationId = applicationId,
+                currentScreenId = currentScreenId,
+                formData = formData
+            )
+        )
+    }
+    
+    override suspend fun navigateBack(applicationId: String, currentScreenId: String): FlowResponseDto {
+        return formApiService.navigateBack(
+            FlowBackRequestDto(
+                applicationId = applicationId,
+                currentScreenId = currentScreenId
+            )
+        )
+    }
+    
+    @Deprecated("Use startFlow() instead for navigation")
     override suspend fun getFormConfiguration(target: String): FormScreenDto {
         return formApiService.getFormConfiguration(target)
     }

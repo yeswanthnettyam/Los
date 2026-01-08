@@ -14,6 +14,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -43,9 +44,9 @@ fun DynamicFormScreen(
     viewModel: DynamicFormViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val flowStack = viewModel.flowStack.collectAsState().value
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
 
     // 🔑 Focus management
     val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -107,8 +108,8 @@ fun DynamicFormScreen(
     }
 
     LaunchedEffect(target) {
-        // Check if this is initial load (flow stack is empty)
-        val isInitialLoad = flowStack.isEmpty()
+        // Check if this is initial load (no current screen in state)
+        val isInitialLoad = uiState.formScreen == null
         // Check if we have pending restore data (from back navigation)
         val restoreData = viewModel.getPendingRestoreData()
         viewModel.loadFormConfiguration(target, isInitialLoad, restoreData)
@@ -131,15 +132,28 @@ fun DynamicFormScreen(
     }
 
     val formScreen = uiState.formScreen
-
-    // Handle system back button using flow stack
-    BackHandler(enabled = flowStack.size > 1) {
-        viewModel.handleBackNavigation(
-            onNavigateToScreen = { screenId ->
-                onNavigateToNext(screenId)
-            },
-            onExitFlow = onNavigateBack
-        )
+    val allowBackNavigation = formScreen?.layout?.allowBackNavigation ?: true // Default to true for backward compatibility
+    
+    // TODO: Get applicationId from a proper source (e.g., SharedPreferences, passed parameter, or screen config)
+    // For now, using a placeholder - this should be replaced with actual applicationId retrieval
+    val applicationId = remember { "placeholder-application-id" } // Replace with actual applicationId
+    
+    // Handle system back button - respect allowBackNavigation flag
+    BackHandler(enabled = allowBackNavigation) {
+        if (allowBackNavigation) {
+            viewModel.handleBackNavigation(
+                applicationId = applicationId,
+                onNavigateToScreen = { screenId ->
+                    onNavigateToNext(screenId)
+                },
+                onError = { error ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(error)
+                    }
+                }
+            )
+        }
+        // If allowBackNavigation is false, BackHandler is disabled, so back is blocked
     }
 
     Scaffold(
@@ -158,26 +172,30 @@ fun DynamicFormScreen(
                             .height(56.dp)
                             .padding(horizontal = 8.dp)
                     ) {
-                        IconButton(
-                            onClick = {
-                                if (flowStack.size > 1) {
+                        // Show back button only if allowBackNavigation is true
+                        if (allowBackNavigation) {
+                            IconButton(
+                                onClick = {
                                     viewModel.handleBackNavigation(
+                                        applicationId = applicationId,
                                         onNavigateToScreen = { screenId ->
                                             onNavigateToNext(screenId)
                                         },
-                                        onExitFlow = onNavigateBack
+                                        onError = { error ->
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar(error)
+                                            }
+                                        }
                                     )
-                                } else {
-                                    onNavigateBack()
-                                }
-                            },
-                            modifier = Modifier.align(Alignment.CenterStart)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
+                                },
+                                modifier = Modifier.align(Alignment.CenterStart)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
                         Text(
                             text = formScreen?.title ?: "Form",
