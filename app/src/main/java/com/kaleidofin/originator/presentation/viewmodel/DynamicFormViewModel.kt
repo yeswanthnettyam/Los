@@ -156,7 +156,7 @@ class DynamicFormViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(DynamicFormUiState())
     val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
-    
+
     // Flow stack removed - navigation is now backend-driven
 
     /* ---------------- LOAD ---------------- */
@@ -425,19 +425,15 @@ class DynamicFormViewModel @Inject constructor(
                     
                     repeat(instanceCount) { index ->
                         section.fields.forEach { dependentField ->
-                            if (dependentField.enabledWhen.isNotEmpty()) {
+                            dependentField.enabledWhen?.let { condition ->
                                 val dependentFieldKey = if (section.repeatable) "${dependentField.id}_$index" else dependentField.id
                                 
                                 // Check if dependent field should be enabled with new value
                                 val tempState = currentState.copy(formData = newFormData)
-                                val isEnabled = dependentField.enabledWhen.all { condition ->
-                                    tempState.evaluateEnabledCondition(condition, if (section.repeatable) index else null)
-                                }
+                                val isEnabled = tempState.evaluateDependencyCondition(condition, if (section.repeatable) index else null)
                                 
                                 // If field becomes disabled, clear its error and value
-                                val wasEnabled = dependentField.enabledWhen.all { condition ->
-                                    currentState.evaluateEnabledCondition(condition, if (section.repeatable) index else null)
-                                }
+                                val wasEnabled = currentState.evaluateDependencyCondition(condition, if (section.repeatable) index else null)
                                 
                                 if (wasEnabled && !isEnabled) {
                                     // Field is being disabled - clear error and value
@@ -446,6 +442,30 @@ class DynamicFormViewModel @Inject constructor(
                                     android.util.Log.d("DynamicFormViewModel", "Cleared error and value for disabled dependent field: $dependentFieldKey")
                                 } else if (!isEnabled && containsKey(dependentFieldKey)) {
                                     // Field was already disabled but had error - clear error
+                                    remove(dependentFieldKey)
+                                }
+                            }
+                            
+                            // Handle visibleWhen - clear value and error if field becomes invisible
+                            dependentField.visibleWhen?.let { condition ->
+                                val dependentFieldKey = if (section.repeatable) "${dependentField.id}_$index" else dependentField.id
+                                val tempState = currentState.copy(formData = newFormData)
+                                val isVisible = tempState.evaluateDependencyCondition(condition, if (section.repeatable) index else null)
+                                val wasVisible = currentState.evaluateDependencyCondition(condition, if (section.repeatable) index else null)
+                                
+                                if (wasVisible && !isVisible) {
+                                    // Field is being hidden - clear error, value, and verification state
+                                    remove(dependentFieldKey)
+                                    newFormData.remove(dependentFieldKey) // Clear the entered value
+                                    
+                                    // Clear verification state if it's a verified input field
+                                    val verificationKey = "${dependentFieldKey}_verified"
+                                    remove(verificationKey)
+                                    newFormData.remove(verificationKey)
+                                    
+                                    android.util.Log.d("DynamicFormViewModel", "Cleared error, value, and verification for hidden dependent field: $dependentFieldKey")
+                                } else if (!isVisible && containsKey(dependentFieldKey)) {
+                                    // Field was already hidden but had error - clear error
                                     remove(dependentFieldKey)
                                 }
                             }
@@ -499,13 +519,9 @@ class DynamicFormViewModel @Inject constructor(
             }
             
             // Validate using current state
-            val isFieldEnabled = if (field.enabledWhen.isNotEmpty()) {
-                field.enabledWhen.all { condition ->
-                    state.evaluateEnabledCondition(condition, sectionIndex)
-                }
-            } else {
-                true
-            }
+            val isFieldEnabled = field.enabledWhen?.let { condition ->
+                state.evaluateDependencyCondition(condition, sectionIndex)
+            } ?: true
             
             val error = if (!isFieldEnabled) {
                 null // No error for disabled fields
@@ -521,11 +537,50 @@ class DynamicFormViewModel @Inject constructor(
                         null
                     }
                 } else if (field.type == "NUMBER" && currentValue is String && currentValue.isNotBlank()) {
-                    // Check length constraints first
+                    // Check if it's a valid number (only digits)
+                    if (!currentValue.all { it.isDigit() }) {
+                        "${field.label} must be a number"
+                    } else {
+                        // Convert to number for numeric value validation
+                        val num = currentValue.toIntOrNull()
+                        if (num == null) {
+                            "${field.label} must be a valid number"
+                        } else {
+                            // For NUMBER fields, validate numeric value constraints using min/max
+                            when {
+                                field.min != null && num < field.min -> "${field.label} must be at least ${field.min}"
+                                field.max != null && num > field.max -> "${field.label} must be at most ${field.max}"
+                                // Also validate length constraints for NUMBER fields
+                                field.maxLength != null && currentValue.length > field.maxLength -> 
+                                    "${field.label} must be at most ${field.maxLength} characters"
+                                else -> null
+                            }
+                        }
+                    }
+                } else if (field.type == "DROPDOWN" && field.selectionMode == "MULTIPLE" && currentValue is String) {
+                    // Validate multi-select dropdown constraints (minSelections, maxSelections)
+                    val selectedValues = if (currentValue.isBlank()) {
+                        emptyList<String>()
+                    } else {
+                        currentValue.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    }
+                    
                     when {
-                        field.min != null && currentValue.length < field.min -> "${field.label} must be at least ${field.min} characters"
-                        field.max != null && currentValue.length > field.max -> "${field.label} must be at most ${field.max} characters"
-                        !currentValue.all { it.isDigit() } -> "${field.label} must be a number"
+                        field.minSelections != null && selectedValues.size < field.minSelections -> 
+                            "${field.label} must select at least ${field.minSelections} ${if (field.minSelections == 1) "option" else "options"}"
+                        field.maxSelections != null && selectedValues.size > field.maxSelections -> 
+                            "${field.label} must select at most ${field.maxSelections} ${if (field.maxSelections == 1) "option" else "options"}"
+                        else -> null
+                    }
+                } else if (currentValue is String && currentValue.isNotBlank()) {
+                    // Validate min/max length for all text-based input fields (TEXT, TEXTAREA, VERIFIED_INPUT, API_VERIFICATION, etc.)
+                    when {
+                        field.maxLength != null && currentValue.length > field.maxLength -> 
+                            "${field.label} must be at most ${field.maxLength} characters"
+                        field.min != null && currentValue.length < field.min -> 
+                            "${field.label} must be at least ${field.min} characters"
+                        field.max != null && currentValue.length > field.max -> 
+                            "${field.label} must be at most ${field.max} characters"
                         else -> null
                     }
                 } else {
@@ -549,22 +604,23 @@ class DynamicFormViewModel @Inject constructor(
         val state = _uiState.value
         
         // Check if field is enabled based on enabledWhen conditions
-        val isFieldEnabled = if (field.enabledWhen.isNotEmpty()) {
-            field.enabledWhen.all { condition ->
-                state.evaluateEnabledCondition(condition, sectionIndex)
-            }
-        } else {
-            true // Field is always enabled if no enabledWhen conditions
-        }
+        val isFieldEnabled = field.enabledWhen?.let { condition ->
+            state.evaluateDependencyCondition(condition, sectionIndex)
+        } ?: true // Field is always enabled if no enabledWhen conditions
         
         // Skip validation if field is disabled
         if (!isFieldEnabled) {
             return null // No error for disabled fields
         }
 
-        // Required validation - only check if field is enabled
-        if (field.required && (value == null || (value is String && value.isBlank())))
+        // Required validation - check both field.required and requiredWhen conditions
+        val isRequired = field.required || (field.requiredWhen?.let { condition ->
+            state.evaluateDependencyCondition(condition, sectionIndex)
+        } ?: false)
+        
+        if (isRequired && (value == null || (value is String && value.isBlank()))) {
             return "${field.label} is required"
+        }
 
         if (field.validation != null && value is String && value.isNotBlank()) {
             if (!field.validation.regex.toRegex().matches(value))
@@ -572,45 +628,86 @@ class DynamicFormViewModel @Inject constructor(
         }
 
         if (field.type == "NUMBER" && value is String && value.isNotBlank()) {
-            // For NUMBER fields, min/max are used for length constraints
-            // Check length constraints first
-            field.min?.let { minLength ->
-                if (value.length < minLength) {
-                    return "${field.label} must be at least $minLength characters"
+            // Check if it's a valid number (only digits)
+            if (!value.all { it.isDigit() }) {
+                return "${field.label} must be a number"
+            }
+            
+            // Convert to number for numeric value validation
+            val num = value.toIntOrNull()
+            if (num == null && value.isNotEmpty()) {
+                return "${field.label} must be a valid number"
+            }
+            
+            // For NUMBER fields, validate numeric value constraints using min/max
+            if (num != null) {
+                field.min?.let { minValue ->
+                    if (num < minValue) {
+                        return "${field.label} must be at least $minValue"
+                    }
+                }
+                field.max?.let { maxValue ->
+                    if (num > maxValue) {
+                        return "${field.label} must be at most $maxValue"
+                    }
                 }
             }
-            field.max?.let { maxLength ->
+            
+            // For NUMBER fields, also validate length constraints
+            // maxLength validates maximum character count
+            field.maxLength?.let { maxLength ->
                 if (value.length > maxLength) {
                     return "${field.label} must be at most $maxLength characters"
                 }
             }
             
-            // Then check if it's a valid number (only digits)
-            if (!value.all { it.isDigit() }) {
-                return "${field.label} must be a number"
+            // Note: For NUMBER fields, min/max are used for numeric values, not length
+            // If length validation is needed, use maxLength for maximum length
+            // For minimum length, we could add a separate minLength field in the future
+        }
+        
+        // Validate multi-select dropdown constraints (minSelections, maxSelections)
+        if (field.type == "DROPDOWN" && field.selectionMode == "MULTIPLE" && value is String) {
+            // Parse comma-separated value into list
+            val selectedValues = if (value.isBlank()) {
+                emptyList<String>()
+            } else {
+                value.split(",").map { it.trim() }.filter { it.isNotBlank() }
             }
             
-            // Convert to number for potential numeric value validation
-            val num = value.toIntOrNull()
-            if (num == null && value.isNotEmpty()) {
-                return "${field.label} must be a valid number"
+            // Validate minSelections
+            field.minSelections?.let { minSelections ->
+                if (selectedValues.size < minSelections) {
+                    return "${field.label} must select at least $minSelections ${if (minSelections == 1) "option" else "options"}"
+                }
+            }
+            
+            // Validate maxSelections
+            field.maxSelections?.let { maxSelections ->
+                if (selectedValues.size > maxSelections) {
+                    return "${field.label} must select at most $maxSelections ${if (maxSelections == 1) "option" else "options"}"
+                }
             }
         }
         
-        // Validate maxLength for text fields (including VERIFIED_INPUT and API_VERIFICATION)
-        if (value is String && value.isNotBlank() && field.maxLength != null) {
-            if (value.length > field.maxLength) {
-                return "${field.label} must be at most ${field.maxLength} characters"
+        // Validate min/max length for all text-based input fields
+        // This applies to: TEXT, TEXTAREA, VERIFIED_INPUT, API_VERIFICATION, and any other text input types
+        if (value is String && value.isNotBlank()) {
+            // Validate maxLength for all text input fields
+            field.maxLength?.let { maxLength ->
+                if (value.length > maxLength) {
+                    return "${field.label} must be at most $maxLength characters"
+                }
             }
-        }
-        
-        // Validate min/max length for string fields (non-NUMBER types)
-        if (field.type != "NUMBER" && value is String && value.isNotBlank()) {
+            
+            // Validate min length for all text input fields
             field.min?.let { minLength ->
                 if (value.length < minLength) {
                     return "${field.label} must be at least $minLength characters"
                 }
             }
+            
+            // Validate max length for all text input fields (alternative to maxLength)
             field.max?.let { maxLength ->
                 if (value.length > maxLength) {
                     return "${field.label} must be at most $maxLength characters"

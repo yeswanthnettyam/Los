@@ -209,7 +209,11 @@ data class FieldDto(
     @SerializedName("apiVerificationConfig") val apiVerificationConfig: ApiVerificationConfigDto? = null,
     @SerializedName("allowedFileTypes") val allowedFileTypes: List<String>? = null,
     @SerializedName("maxFileSizeMB") val maxFileSizeMB: String? = null,
-    @SerializedName("maxFiles") val maxFiles: String? = null
+    @SerializedName("maxFiles") val maxFiles: String? = null,
+    // Dropdown multi-select configuration
+    @SerializedName("selectionMode") val selectionMode: String? = null, // "SINGLE" | "MULTIPLE", defaults to "SINGLE"
+    @SerializedName("minSelections") val minSelections: Int? = null,
+    @SerializedName("maxSelections") val maxSelections: Int? = null
 ) {
     // Helper to convert maxLength to Int
     val maxLengthInt: Int?
@@ -222,73 +226,127 @@ data class FieldDto(
     val maxInt: Int?
         get() = max?.toIntOrNull()
     
-    // Helper to convert enabledWhen to list
-    val enabledWhenList: List<EnabledConditionDto>
-        get() {
-            return when {
-                enabledWhen == null || enabledWhen.isJsonNull -> emptyList()
-                enabledWhen.isJsonObject -> {
-                    val obj = enabledWhen.asJsonObject
-                    // Handle empty object {} - return empty list
-                    if (obj.size() == 0) {
-                        emptyList()
-                    } else {
-                        // Convert object to list
-                        val field = obj.get("field")?.asString
-                        val operator = obj.get("operator")?.asString
-                        val valueElement = obj.get("value")
-                        val value = when {
-                            valueElement == null || valueElement.isJsonNull -> null
-                            valueElement.isJsonPrimitive -> {
-                                val primitive = valueElement.asJsonPrimitive
+    /**
+     * Helper to parse dependency condition from JSON with backward compatibility.
+     * Supports both single conditions and condition groups.
+     * Single conditions are automatically wrapped in an AND group for backward compatibility.
+     */
+    val enabledWhenCondition: DependencyConditionDto?
+        get() = parseDependencyCondition(enabledWhen)
+    
+    val visibleWhenCondition: DependencyConditionDto?
+        get() = parseDependencyCondition(visibleWhen)
+    
+    val requiredWhenCondition: DependencyConditionDto?
+        get() = parseDependencyCondition(requiredWhen)
+    
+    /**
+     * Parse a dependency condition from JSON element.
+     * Handles backward compatibility by wrapping single conditions in AND groups.
+     */
+    private fun parseDependencyCondition(jsonElement: JsonElement?): DependencyConditionDto? {
+        if (jsonElement == null || jsonElement.isJsonNull) {
+            return null
+        }
+        
+        if (!jsonElement.isJsonObject) {
+            return null
+        }
+        
+        val obj = jsonElement.asJsonObject
+        
+        // Handle empty object {} - return null
+        if (obj.size() == 0) {
+            return null
+        }
+        
+        // Check if this is a condition group (has "operator" and "conditions" keys)
+        val hasOperator = obj.has("operator") && obj.get("operator")?.asString != null
+        val hasConditions = obj.has("conditions") && obj.get("conditions")?.isJsonArray == true
+        
+        if (hasOperator && hasConditions) {
+            // This is a condition group
+            val operator = obj.get("operator")?.asString ?: "AND"
+            val conditionsArray = obj.get("conditions")?.asJsonArray ?: return null
+            val conditions = conditionsArray.mapNotNull { element ->
+                parseDependencyCondition(element)
+            }
+            if (conditions.isEmpty()) {
+                return null
+            }
+            return DependencyConditionDto.ConditionGroupDto(operator, conditions)
+        } else {
+            // This is a simple condition (backward compatibility)
+            val field = obj.get("field")?.asString
+            val operator = obj.get("operator")?.asString
+            val valueElement = obj.get("value")
+            
+            // For EXISTS and NOT_EXISTS, value can be null
+            val operatorUpper = operator?.uppercase() ?: ""
+            val valueCanBeNull = operatorUpper == "EXISTS" || operatorUpper == "NOT_EXISTS"
+            
+            val value = when {
+                valueElement == null || valueElement.isJsonNull -> {
+                    if (valueCanBeNull) null else return null
+                }
+                valueElement.isJsonPrimitive -> {
+                    val primitive = valueElement.asJsonPrimitive
+                    when {
+                        primitive.isString -> primitive.asString
+                        primitive.isNumber -> primitive.asNumber
+                        primitive.isBoolean -> primitive.asBoolean
+                        else -> primitive.asString
+                    }
+                }
+                valueElement.isJsonArray -> {
+                    // Handle array values (for IN operator)
+                    valueElement.asJsonArray.mapNotNull { elem ->
+                        when {
+                            elem.isJsonPrimitive -> {
+                                val prim = elem.asJsonPrimitive
                                 when {
-                                    primitive.isString -> primitive.asString
-                                    primitive.isNumber -> primitive.asNumber
-                                    primitive.isBoolean -> primitive.asBoolean
-                                    else -> primitive.asString
+                                    prim.isString -> prim.asString
+                                    prim.isNumber -> prim.asNumber
+                                    prim.isBoolean -> prim.asBoolean
+                                    else -> prim.asString
                                 }
                             }
-                            else -> valueElement.toString()
-                        }
-                        if (field != null && operator != null && field.isNotEmpty() && operator.isNotEmpty() && value != null) {
-                            listOf(EnabledConditionDto(field, operator, value))
-                        } else {
-                            emptyList()
+                            else -> elem.toString()
                         }
                     }
                 }
-                enabledWhen.isJsonArray -> {
-                    // Already a list
-                    enabledWhen.asJsonArray.mapNotNull { element ->
-                        if (element.isJsonObject) {
-                            val obj = element.asJsonObject
-                            val field = obj.get("field")?.asString
-                            val operator = obj.get("operator")?.asString
-                            val valueElement = obj.get("value")
-                            val value = when {
-                                valueElement == null || valueElement.isJsonNull -> null
-                                valueElement.isJsonPrimitive -> {
-                                    val primitive = valueElement.asJsonPrimitive
-                                    when {
-                                        primitive.isString -> primitive.asString
-                                        primitive.isNumber -> primitive.asNumber
-                                        primitive.isBoolean -> primitive.asBoolean
-                                        else -> primitive.asString
-                                    }
-                                }
-                                else -> valueElement.toString()
-                            }
-                            if (field != null && operator != null && field.isNotEmpty() && operator.isNotEmpty() && value != null) {
-                                EnabledConditionDto(field, operator, value)
-                            } else {
-                                null
-                            }
+                else -> valueElement.toString()
+            }
+            
+            if (field != null && operator != null && field.isNotEmpty() && operator.isNotEmpty()) {
+                if (valueCanBeNull || value != null) {
+                    return DependencyConditionDto.ConditionDto(field, operator, value)
+                }
+            }
+            return null
+        }
+    }
+    
+    // Legacy helper for backward compatibility (deprecated)
+    @Deprecated("Use enabledWhenCondition instead", ReplaceWith("enabledWhenCondition"))
+    val enabledWhenList: List<EnabledConditionDto>
+        get() {
+            val condition = enabledWhenCondition
+            return when (condition) {
+                is DependencyConditionDto.ConditionDto -> {
+                    listOf(EnabledConditionDto(condition.field, condition.operator, condition.value ?: ""))
+                }
+                is DependencyConditionDto.ConditionGroupDto -> {
+                    // Flatten condition group to list (for backward compatibility)
+                    condition.conditions.mapNotNull { c ->
+                        if (c is DependencyConditionDto.ConditionDto) {
+                            EnabledConditionDto(c.field, c.operator, c.value ?: "")
                         } else {
                             null
                         }
                     }
                 }
-                else -> emptyList()
+                null -> emptyList()
             }
         }
     
@@ -333,11 +391,35 @@ data class StaticDataItemDto(
     @SerializedName("label") val label: String
 )
 
-data class EnabledConditionDto(
-    @SerializedName("field") val field: String,
-    @SerializedName("operator") val operator: String, // "EQUALS", "NOT_EQUALS", "IN", etc.
-    @SerializedName("value") val value: Any
-)
+/**
+ * DTO for dependency conditions. Can represent either a simple condition or a condition group.
+ * Backward compatible: single condition objects are automatically wrapped in an AND group.
+ */
+sealed class DependencyConditionDto {
+    /**
+     * Simple condition: field operator value
+     */
+    data class ConditionDto(
+        @SerializedName("field") val field: String,
+        @SerializedName("operator") val operator: String, // "EQUALS", "NOT_EQUALS", "IN", "NOT_IN", "EXISTS", "NOT_EXISTS", "GREATER_THAN", "LESS_THAN"
+        @SerializedName("value") val value: Any? // Can be null for EXISTS/NOT_EXISTS
+    ) : DependencyConditionDto()
+    
+    /**
+     * Condition group: operator (AND/OR) with list of conditions/groups
+     */
+    data class ConditionGroupDto(
+        @SerializedName("operator") val operator: String, // "AND" | "OR"
+        @SerializedName("conditions") val conditions: List<DependencyConditionDto>
+    ) : DependencyConditionDto()
+}
+
+/**
+ * Legacy EnabledConditionDto for backward compatibility.
+ * @deprecated Use DependencyConditionDto.ConditionDto instead
+ */
+@Deprecated("Use DependencyConditionDto.ConditionDto instead", ReplaceWith("DependencyConditionDto.ConditionDto"))
+typealias EnabledConditionDto = DependencyConditionDto.ConditionDto
 
 data class VerificationDto(
     @SerializedName("enabled") val enabled: Boolean,
@@ -524,3 +606,4 @@ data class BackNavigationResponseDto(
         )
     }
 }
+

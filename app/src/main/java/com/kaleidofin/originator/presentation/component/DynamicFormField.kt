@@ -5,10 +5,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -17,15 +25,21 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Verified
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -80,8 +94,8 @@ fun DynamicFormField(
         value = textValue,
         onValueChange = { newValue ->
             // newValue contains the FULL text including what user just typed
-            // Filter for NUMBER keyboard
-            val filtered = if (field.keyboard == "NUMBER") {
+            // Filter for NUMBER type or NUMBER keyboard - only accept digits
+            val filtered = if (field.type == "NUMBER" || field.keyboard == "NUMBER") {
                 newValue.filter { it.isDigit() }
             } else {
                 newValue
@@ -151,6 +165,44 @@ fun DynamicFormField(
 
 @Composable
 fun DynamicDropdownField(
+    field: FormField,
+    value: Any?,
+    error: String?,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    onBlur: () -> Unit,
+    modifier: Modifier = Modifier,
+    isEnabled: Boolean = true
+) {
+    val selectionMode = field.selectionMode ?: "SINGLE" // Default to SINGLE for backward compatibility
+    
+    if (selectionMode == "MULTIPLE") {
+        DynamicMultiSelectDropdown(
+            field = field,
+            value = value,
+            error = error,
+            options = options,
+            onValueChange = onValueChange,
+            onBlur = onBlur,
+            modifier = modifier,
+            isEnabled = isEnabled
+        )
+    } else {
+        DynamicSingleSelectDropdown(
+            field = field,
+            value = value,
+            error = error,
+            options = options,
+            onValueChange = onValueChange,
+            onBlur = onBlur,
+            modifier = modifier,
+            isEnabled = isEnabled
+        )
+    }
+}
+
+@Composable
+private fun DynamicSingleSelectDropdown(
     field: FormField,
     value: Any?,
     error: String?,
@@ -234,6 +286,167 @@ fun DynamicDropdownField(
             interactionSource.interactions.collect { interaction ->
                 if (interaction is PressInteraction.Release && isEnabled) {
                     expanded = true
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DynamicMultiSelectDropdown(
+    field: FormField,
+    value: Any?,
+    error: String?,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    onBlur: () -> Unit,
+    modifier: Modifier = Modifier,
+    isEnabled: Boolean = true
+) {
+    var showBottomSheet by remember { mutableStateOf(false) }
+    
+    // Parse comma-separated value into list for edit/update support
+    val selectedValues = remember(value) {
+        val valueStr = value?.toString() ?: ""
+        if (valueStr.isBlank()) {
+            emptySet<String>()
+        } else {
+            valueStr.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        }
+    }
+    
+    // Display text: show selected items as comma-separated labels or count
+    val displayText = remember(selectedValues) {
+        when {
+            selectedValues.isEmpty() -> ""
+            selectedValues.size <= 3 -> selectedValues.joinToString(", ")
+            else -> "${selectedValues.size} items selected"
+        }
+    }
+    
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = displayText,
+            onValueChange = {},
+            readOnly = true,
+            enabled = isEnabled,
+            label = { Text(field.label + if (field.required) " *" else "") },
+            placeholder = { Text(field.placeholder ?: "Select ${field.label}") },
+            trailingIcon = {
+                Icon(
+                    imageVector = if (showBottomSheet) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null
+                )
+            },
+            isError = error != null,
+            interactionSource = interactionSource,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = isEnabled) {
+                    if (isEnabled) {
+                        showBottomSheet = true
+                    }
+                },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                errorIndicatorColor = Color(0xFFB00020)
+            ),
+            supportingText = error?.let {
+                { Text(it, color = Color(0xFFB00020)) }
+            }
+        )
+        
+        // Show selected items as chips below the field if few items selected
+        // Note: Chips are shown in a separate Row below the TextField for better UX
+        // The TextField already shows the display text, chips allow quick removal
+
+        // Multi-select bottom sheet
+        if (showBottomSheet) {
+            ModalBottomSheet(
+                onDismissRequest = {
+                    showBottomSheet = false
+                    onBlur()
+                },
+                modifier = Modifier.fillMaxHeight(0.8f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = field.label,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    // Show helper message if maxSelections reached
+                    field.maxSelections?.let { max ->
+                        if (selectedValues.size >= max) {
+                            Text(
+                                text = "Maximum $max selections allowed",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                    }
+                    
+                    // Checkbox list
+                    if (options.isEmpty()) {
+                        Text("No options available")
+                    } else {
+                        options.forEach { option ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = isEnabled) {
+                                        val newSelections = selectedValues.toMutableSet().apply {
+                                            if (contains(option)) {
+                                                remove(option)
+                                            } else {
+                                                // Check maxSelections constraint
+                                                val max = field.maxSelections
+                                                if (max == null || size < max) {
+                                                    add(option)
+                                                }
+                                            }
+                                        }
+                                        // Store as comma-separated string
+                                        val newValue = newSelections.joinToString(",")
+                                        onValueChange(newValue)
+                                    }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = selectedValues.contains(option),
+                                    onCheckedChange = null, // Handled by Row clickable
+                                    enabled = isEnabled && (field.maxSelections == null || selectedValues.size < field.maxSelections || selectedValues.contains(option))
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // Make TextField taps reliably open the bottom sheet
+        LaunchedEffect(interactionSource) {
+            interactionSource.interactions.collect { interaction ->
+                if (interaction is PressInteraction.Release && isEnabled) {
+                    showBottomSheet = true
                 }
             }
         }

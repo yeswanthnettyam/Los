@@ -82,7 +82,9 @@ fun FieldDto.toDomain(): FormField {
         readOnly = readOnly,
         value = value,
         dataSource = dataSource?.toDomain(),
-        enabledWhen = enabledWhenList.map { it.toDomain() },
+        enabledWhen = enabledWhenCondition?.toDomain(),
+        visibleWhen = visibleWhenCondition?.toDomain(),
+        requiredWhen = requiredWhenCondition?.toDomain(),
         verification = verification?.toDomain(),
         validation = validation?.toDomain(),
         constraints = constraints?.toDomain(),
@@ -93,7 +95,10 @@ fun FieldDto.toDomain(): FormField {
         maxDate = actualMaxDate,
         dateConfig = dateConfig?.toDomain(),
         verifiedInputConfig = verifiedInputConfig?.toDomain(),
-        apiVerificationConfig = apiVerificationConfig?.toDomain()
+        apiVerificationConfig = apiVerificationConfig?.toDomain(),
+        selectionMode = selectionMode,
+        minSelections = minSelections,
+        maxSelections = maxSelections
     )
 }
 
@@ -129,11 +134,31 @@ fun DataSourceDto.toDomain(): FieldDataSource {
     )
 }
 
+fun DependencyConditionDto.toDomain(): com.kaleidofin.originator.domain.model.DependencyCondition {
+    return when (this) {
+        is DependencyConditionDto.ConditionDto -> {
+            com.kaleidofin.originator.domain.model.DependencyCondition.Condition(
+                field = field,
+                operator = operator,
+                value = value
+            )
+        }
+        is DependencyConditionDto.ConditionGroupDto -> {
+            com.kaleidofin.originator.domain.model.DependencyCondition.ConditionGroup(
+                operator = operator,
+                conditions = conditions.map { it.toDomain() }
+            )
+        }
+    }
+}
+
+// Legacy mapper for backward compatibility
+@Deprecated("Use DependencyConditionDto.toDomain() instead", ReplaceWith("toDomain()"))
 fun EnabledConditionDto.toDomain(): EnabledCondition {
     return EnabledCondition(
         field = field,
         operator = operator,
-        value = value
+        value = value ?: ""
     )
 }
 

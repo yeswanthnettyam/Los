@@ -1,6 +1,6 @@
 package com.kaleidofin.originator.presentation.ui.state
 
-import com.kaleidofin.originator.domain.model.EnabledCondition
+import com.kaleidofin.originator.domain.model.DependencyCondition
 import com.kaleidofin.originator.domain.model.FormScreen
 import com.kaleidofin.originator.domain.model.FormSection
 import com.kaleidofin.originator.domain.model.SubmitCondition
@@ -79,13 +79,9 @@ data class DynamicFormUiState(
                     if (!isValid) return@forEach // Early exit if already invalid
                     
                     // Check if field is enabled based on enabledWhen conditions
-                    val isFieldEnabled = if (field.enabledWhen.isNotEmpty()) {
-                        field.enabledWhen.all { condition ->
-                            evaluateEnabledCondition(condition, if (section.repeatable) index else null)
-                        }
-                    } else {
-                        true // Field is always enabled if no enabledWhen conditions
-                    }
+                    val isFieldEnabled = field.enabledWhen?.let { condition ->
+                        evaluateDependencyCondition(condition, if (section.repeatable) index else null)
+                    } ?: true // Field is always enabled if no enabledWhen conditions
                     
                     // Only validate if field is enabled
                     if (isFieldEnabled && field.required) {
@@ -154,9 +150,38 @@ data class DynamicFormUiState(
     }
     
     /**
-     * Evaluate EnabledCondition (for enabledWhen)
+     * Evaluate a dependency condition (for visibleWhen, enabledWhen, requiredWhen).
+     * Supports both simple conditions and condition groups with AND/OR logic.
+     * Also supports SINGLE and MULTIPLE select dropdowns.
      */
-    fun evaluateEnabledCondition(condition: EnabledCondition, sectionIndex: Int? = null): Boolean {
+    fun evaluateDependencyCondition(condition: com.kaleidofin.originator.domain.model.DependencyCondition, sectionIndex: Int? = null): Boolean {
+        return when (condition) {
+            is com.kaleidofin.originator.domain.model.DependencyCondition.Condition -> {
+                evaluateSimpleCondition(condition, sectionIndex)
+            }
+            is com.kaleidofin.originator.domain.model.DependencyCondition.ConditionGroup -> {
+                evaluateConditionGroup(condition, sectionIndex)
+            }
+        }
+    }
+    
+    /**
+     * Evaluate a condition group with AND/OR logic.
+     */
+    private fun evaluateConditionGroup(group: com.kaleidofin.originator.domain.model.DependencyCondition.ConditionGroup, sectionIndex: Int? = null): Boolean {
+        val results = group.conditions.map { evaluateDependencyCondition(it, sectionIndex) }
+        return when (group.operator.uppercase()) {
+            "AND" -> results.all { it }
+            "OR" -> results.any { it }
+            else -> results.all { it } // Default to AND
+        }
+    }
+    
+    /**
+     * Evaluate a simple condition (field operator value).
+     * Supports both SINGLE and MULTIPLE select dropdowns.
+     */
+    private fun evaluateSimpleCondition(condition: com.kaleidofin.originator.domain.model.DependencyCondition.Condition, sectionIndex: Int? = null): Boolean {
         val fieldId = condition.field
         val actualFieldId = if (sectionIndex != null) "${fieldId}_$sectionIndex" else fieldId
         val rawValue = formData[actualFieldId]
@@ -164,12 +189,36 @@ data class DynamicFormUiState(
         val actualValue = unwrappedValue?.toString()?.trim() ?: ""
         val expectedValue = condition.value
         
+        // Check if this is a multi-select value (comma-separated string)
+        // For multi-select dropdowns, value is stored as "VALUE1,VALUE2,VALUE3"
+        val isMultiSelectValue = actualValue.contains(",")
+        val actualValuesList = if (isMultiSelectValue) {
+            actualValue.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        } else {
+            listOf(actualValue).filter { it.isNotBlank() }
+        }
+        
         return when (condition.operator.uppercase()) {
             "EQUALS", "==" -> {
                 when {
                     expectedValue is Boolean -> unwrappedValue == expectedValue
-                    expectedValue is String -> actualValue.equals(expectedValue.toString().trim(), ignoreCase = true)
-                    else -> actualValue == expectedValue.toString()
+                    expectedValue is String -> {
+                        val expectedStr = expectedValue.toString().trim()
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if list CONTAINS the expected value
+                            actualValuesList.any { it.equals(expectedStr, ignoreCase = true) }
+                        } else {
+                            // For single-select: exact match
+                            actualValue.equals(expectedStr, ignoreCase = true)
+                        }
+                    }
+                    else -> {
+                        if (isMultiSelectValue) {
+                            actualValuesList.any { it == expectedValue.toString() }
+                        } else {
+                            actualValue == expectedValue.toString()
+                        }
+                    }
                 }
             }
             "NOT_EQUALS", "!=" -> {
@@ -179,20 +228,51 @@ data class DynamicFormUiState(
                 }
                 when {
                     expectedValue is Boolean -> unwrappedValue != expectedValue
-                    expectedValue is String -> !actualValue.equals(expectedValue.toString().trim(), ignoreCase = true)
-                    else -> actualValue != expectedValue.toString()
+                    expectedValue is String -> {
+                        val expectedStr = expectedValue.toString().trim()
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if list does NOT contain the expected value
+                            !actualValuesList.any { it.equals(expectedStr, ignoreCase = true) }
+                        } else {
+                            // For single-select: not equal
+                            !actualValue.equals(expectedStr, ignoreCase = true)
+                        }
+                    }
+                    else -> {
+                        if (isMultiSelectValue) {
+                            !actualValuesList.any { it == expectedValue.toString() }
+                        } else {
+                            actualValue != expectedValue.toString()
+                        }
+                    }
                 }
             }
             "IN" -> {
                 when {
                     expectedValue is List<*> -> {
                         val expectedValues = expectedValue.mapNotNull { it?.toString()?.trim() }
-                        expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if ANY selected value matches
+                            actualValuesList.any { selectedValue ->
+                                expectedValues.any { it.equals(selectedValue, ignoreCase = true) }
+                            }
+                        } else {
+                            // For single-select: check if actual value is in expected list
+                            expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        }
                     }
                     expectedValue is String -> {
                         // Handle comma-separated string like "Voter Id,Passport,None"
                         val expectedValues = expectedValue.split(",").map { it.trim() }
-                        expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if ANY selected value matches
+                            actualValuesList.any { selectedValue ->
+                                expectedValues.any { it.equals(selectedValue, ignoreCase = true) }
+                            }
+                        } else {
+                            // For single-select: check if actual value is in expected list
+                            expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        }
                     }
                     else -> false
                 }
@@ -205,18 +285,80 @@ data class DynamicFormUiState(
                 when {
                     expectedValue is List<*> -> {
                         val expectedValues = expectedValue.mapNotNull { it?.toString()?.trim() }
-                        !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if NONE of selected values match
+                            !actualValuesList.any { selectedValue ->
+                                expectedValues.any { it.equals(selectedValue, ignoreCase = true) }
+                            }
+                        } else {
+                            // For single-select: check if actual value is NOT in expected list
+                            !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        }
                     }
                     expectedValue is String -> {
                         // Handle comma-separated string like "None"
                         val expectedValues = expectedValue.split(",").map { it.trim() }
-                        !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        if (isMultiSelectValue) {
+                            // For multi-select: TRUE if NONE of selected values match
+                            !actualValuesList.any { selectedValue ->
+                                expectedValues.any { it.equals(selectedValue, ignoreCase = true) }
+                            }
+                        } else {
+                            // For single-select: check if actual value is NOT in expected list
+                            !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        }
                     }
                     else -> true
                 }
             }
+            "EXISTS" -> {
+                // TRUE if value is not empty
+                actualValue.isNotBlank()
+            }
+            "NOT_EXISTS" -> {
+                // TRUE if value is empty
+                actualValue.isBlank()
+            }
+            "GREATER_THAN", ">" -> {
+                if (expectedValue == null) return false
+                try {
+                    val actualNum = actualValue.toDoubleOrNull()
+                    val expectedNum = when (expectedValue) {
+                        is Number -> expectedValue.toDouble()
+                        is String -> expectedValue.toDoubleOrNull()
+                        else -> null
+                    }
+                    actualNum != null && expectedNum != null && actualNum > expectedNum
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            "LESS_THAN", "<" -> {
+                if (expectedValue == null) return false
+                try {
+                    val actualNum = actualValue.toDoubleOrNull()
+                    val expectedNum = when (expectedValue) {
+                        is Number -> expectedValue.toDouble()
+                        is String -> expectedValue.toDoubleOrNull()
+                        else -> null
+                    }
+                    actualNum != null && expectedNum != null && actualNum < expectedNum
+                } catch (e: Exception) {
+                    false
+                }
+            }
             else -> true
         }
+    }
+    
+    /**
+     * Legacy method for backward compatibility.
+     * @deprecated Use evaluateDependencyCondition instead
+     */
+    @Deprecated("Use evaluateDependencyCondition instead", ReplaceWith("evaluateDependencyCondition(condition, sectionIndex)"))
+    fun evaluateEnabledCondition(condition: com.kaleidofin.originator.domain.model.DependencyCondition.Condition, sectionIndex: Int? = null): Boolean {
+        // This is now just a wrapper around evaluateSimpleCondition
+        return evaluateSimpleCondition(condition, sectionIndex)
     }
 }
 

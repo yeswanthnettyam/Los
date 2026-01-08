@@ -66,7 +66,9 @@ data class FormField(
     val readOnly: Boolean = false,
     val value: Any?,
     val dataSource: FieldDataSource?,
-    val enabledWhen: List<EnabledCondition>,
+    val enabledWhen: DependencyCondition? = null, // Can be Condition or ConditionGroup
+    val visibleWhen: DependencyCondition? = null, // Can be Condition or ConditionGroup
+    val requiredWhen: DependencyCondition? = null, // Can be Condition or ConditionGroup
     val verification: FieldVerification?,
     val validation: FieldValidation?,
     val constraints: FieldConstraints?,
@@ -77,7 +79,11 @@ data class FormField(
     val maxDate: String?,
     val dateConfig: DateConfig? = null,
     val verifiedInputConfig: VerifiedInputConfig? = null,
-    val apiVerificationConfig: ApiVerificationConfig? = null
+    val apiVerificationConfig: ApiVerificationConfig? = null,
+    // Dropdown multi-select configuration
+    val selectionMode: String? = null, // "SINGLE" | "MULTIPLE", defaults to "SINGLE"
+    val minSelections: Int? = null,
+    val maxSelections: Int? = null
 )
 
 data class FieldDataSource(
@@ -90,11 +96,36 @@ data class FieldDataSource(
     val paramKey: String? // For API
 )
 
-data class EnabledCondition(
-    val field: String,
-    val operator: String, // "EQUALS", "NOT_EQUALS", "IN", etc.
-    val value: Any
-)
+/**
+ * Represents a dependency condition that can be either a simple condition or a condition group.
+ * This supports backward compatibility with single conditions and new condition groups with AND/OR logic.
+ */
+sealed class DependencyCondition {
+    /**
+     * Simple condition: field operator value
+     */
+    data class Condition(
+        val field: String,
+        val operator: String, // "EQUALS", "NOT_EQUALS", "IN", "NOT_IN", "EXISTS", "NOT_EXISTS", "GREATER_THAN", "LESS_THAN"
+        val value: Any? // Can be null for EXISTS/NOT_EXISTS
+    ) : DependencyCondition()
+    
+    /**
+     * Condition group: operator (AND/OR) with list of conditions/groups
+     */
+    data class ConditionGroup(
+        val operator: String, // "AND" | "OR"
+        val conditions: List<DependencyCondition>
+    ) : DependencyCondition()
+}
+
+/**
+ * Legacy EnabledCondition for backward compatibility.
+ * This is now a type alias to the new Condition model.
+ * @deprecated Use DependencyCondition.Condition instead
+ */
+@Deprecated("Use DependencyCondition.Condition instead", ReplaceWith("DependencyCondition.Condition"))
+typealias EnabledCondition = DependencyCondition.Condition
 
 data class FieldVerification(
     val enabled: Boolean,

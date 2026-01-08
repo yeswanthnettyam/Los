@@ -704,12 +704,23 @@ private fun FormSection(
                     if (sectionIndex != null) "${field.id}_$sectionIndex" else field.id
                 
                 // Check if field is enabled based on enabledWhen conditions
-                val isFieldEnabled = if (field.enabledWhen.isNotEmpty()) {
-                    field.enabledWhen.all { condition ->
-                        uiState.evaluateEnabledCondition(condition, sectionIndex)
-                    }
-                } else {
-                    true // Field is always enabled if no enabledWhen conditions
+                val isFieldEnabled = field.enabledWhen?.let { condition ->
+                    uiState.evaluateDependencyCondition(condition, sectionIndex)
+                } ?: true // Field is always enabled if no enabledWhen conditions
+                
+                // Check if field is visible based on visibleWhen conditions
+                val isFieldVisible = field.visibleWhen?.let { condition ->
+                    uiState.evaluateDependencyCondition(condition, sectionIndex)
+                } ?: true // Field is always visible if no visibleWhen conditions
+                
+                // Check if field is required based on requiredWhen conditions
+                val isFieldRequired = field.required || (field.requiredWhen?.let { condition ->
+                    uiState.evaluateDependencyCondition(condition, sectionIndex)
+                } ?: false)
+                
+                // Skip rendering if field is not visible
+                if (!isFieldVisible) {
+                    return@forEach
                 }
 
                 // Get current value from state - this should trigger recomposition when state changes
