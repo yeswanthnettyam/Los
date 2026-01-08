@@ -19,7 +19,41 @@ data class DynamicFormUiState(
     val nextScreen: String? = null,
     val firstErrorFieldId: String? = null // Field ID to scroll to on validation error
 ) {
-    fun getFieldValue(fieldId: String): Any? = formData[fieldId]
+    /**
+     * Helper function to wrap a value in { "value": ... } object
+     */
+    private fun wrapValue(value: Any?): Any {
+        return if (value == null) {
+            mapOf("value" to null)
+        } else {
+            mapOf("value" to value)
+        }
+    }
+    
+    /**
+     * Helper function to unwrap a value from { "value": ... } object
+     * Supports both wrapped format { "value": ... } and direct value for backward compatibility
+     */
+    private fun unwrapValue(wrapped: Any?): Any? {
+        return when (wrapped) {
+            null -> null
+            is Map<*, *> -> {
+                // Check if it's a wrapped value object
+                if (wrapped.containsKey("value")) {
+                    wrapped["value"]
+                } else {
+                    // Not wrapped, return as-is (backward compatibility)
+                    wrapped
+                }
+            }
+            else -> wrapped // Direct value (backward compatibility)
+        }
+    }
+    
+    fun getFieldValue(fieldId: String): Any? {
+        val rawValue = formData[fieldId]
+        return unwrapValue(rawValue)
+    }
     
     fun getFieldError(fieldId: String): String? = fieldErrors[fieldId]
     
@@ -56,7 +90,7 @@ data class DynamicFormUiState(
                     // Only validate if field is enabled
                     if (isFieldEnabled && field.required) {
                         val fieldKey = if (section.repeatable) "${field.id}_$index" else field.id
-                        val value = formData[fieldKey]
+                        val value = unwrapValue(formData[fieldKey])
                         if (value == null || (value is String && value.isBlank())) {
                             isValid = false
                             return@forEach
@@ -106,7 +140,7 @@ data class DynamicFormUiState(
             }
             "FIELD_EQUALS" -> {
                 if (condition.field == null) return true
-                val fieldValue = formData[condition.field]
+                val fieldValue = unwrapValue(formData[condition.field])
                 val expectedValue = condition.value
                 
                 when {
@@ -125,13 +159,15 @@ data class DynamicFormUiState(
     fun evaluateEnabledCondition(condition: EnabledCondition, sectionIndex: Int? = null): Boolean {
         val fieldId = condition.field
         val actualFieldId = if (sectionIndex != null) "${fieldId}_$sectionIndex" else fieldId
-        val actualValue = formData[actualFieldId]?.toString()?.trim() ?: ""
+        val rawValue = formData[actualFieldId]
+        val unwrappedValue = unwrapValue(rawValue)
+        val actualValue = unwrappedValue?.toString()?.trim() ?: ""
         val expectedValue = condition.value
         
         return when (condition.operator.uppercase()) {
             "EQUALS", "==" -> {
                 when {
-                    expectedValue is Boolean -> formData[actualFieldId] == expectedValue
+                    expectedValue is Boolean -> unwrappedValue == expectedValue
                     expectedValue is String -> actualValue.equals(expectedValue.toString().trim(), ignoreCase = true)
                     else -> actualValue == expectedValue.toString()
                 }
@@ -142,7 +178,7 @@ data class DynamicFormUiState(
                     return false
                 }
                 when {
-                    expectedValue is Boolean -> formData[actualFieldId] != expectedValue
+                    expectedValue is Boolean -> unwrappedValue != expectedValue
                     expectedValue is String -> !actualValue.equals(expectedValue.toString().trim(), ignoreCase = true)
                     else -> actualValue != expectedValue.toString()
                 }

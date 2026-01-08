@@ -695,7 +695,13 @@ private fun FormSection(
                 }
 
                 // Get current value from state - this should trigger recomposition when state changes
-                val currentValue = uiState.formData[fieldKey]
+                // Unwrap value from { "value": ... } object
+                val wrappedValue = uiState.formData[fieldKey]
+                val currentValue = if (wrappedValue is Map<*, *> && wrappedValue.containsKey("value")) {
+                    wrappedValue["value"]
+                } else {
+                    wrappedValue
+                }
                 
                 // Debug log to verify value is being read from state
                 LaunchedEffect(currentValue, fieldKey) {

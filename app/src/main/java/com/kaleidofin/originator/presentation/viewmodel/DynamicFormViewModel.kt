@@ -62,12 +62,13 @@ class DynamicFormViewModel @Inject constructor(
 
             val initialData = mutableMapOf<String, Any>()
             formScreen.hiddenFields.forEach { field ->
-                initialData[field.id] = field.defaultValue ?: when (field.type) {
+                val defaultValue = field.defaultValue ?: when (field.type) {
                     "BOOLEAN" -> false
                     "TEXT" -> ""
                     "NUMBER" -> 0
                     else -> ""
                 }
+                initialData[field.id] = mapOf("value" to defaultValue)
             }
 
             // Initialize repeatable section instances (including subsections)
@@ -86,10 +87,10 @@ class DynamicFormViewModel @Inject constructor(
             
             fun collectFields(section: com.kaleidofin.originator.domain.model.FormSection, sectionIndex: Int? = null) {
                 section.fields.forEach { field ->
-                    // Initialize field value from JSON if present
+                    // Initialize field value from JSON if present - wrap in { "value": ... }
                     val fieldKey = if (sectionIndex != null) "${field.id}_$sectionIndex" else field.id
                     if (field.value != null) {
-                        initialData[fieldKey] = field.value
+                        initialData[fieldKey] = mapOf("value" to field.value)
                     }
                     
                     field.dataSource?.let { dataSource ->
@@ -151,9 +152,18 @@ class DynamicFormViewModel @Inject constructor(
             }
 
             // If restoreData is provided, merge it with initial data
+            // Wrap restoreData values if they're not already wrapped
             val finalFormData = if (restoreData != null) {
                 val mergedData = initialData.toMutableMap()
-                mergedData.putAll(restoreData)
+                restoreData.forEach { (key, value) ->
+                    // Check if value is already wrapped, if not wrap it
+                    val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
+                        value // Already wrapped
+                    } else {
+                        mapOf("value" to value) // Wrap it
+                    }
+                    mergedData[key] = wrappedValue
+                }
                 mergedData
             } else {
                 initialData
@@ -210,8 +220,13 @@ class DynamicFormViewModel @Inject constructor(
         
         android.util.Log.d("DynamicFormViewModel", "Found field: ${field?.id}, type: ${field?.type}, isVerifiedInputField: ${field?.type == "VERIFIED_INPUT" || field?.type == "API_VERIFICATION"}")
         
-        // Check if value actually changed
-        val oldValue = state.formData[finalId]
+        // Check if value actually changed - unwrap old value for comparison
+        val oldWrappedValue = state.formData[finalId]
+        val oldValue = if (oldWrappedValue is Map<*, *> && oldWrappedValue.containsKey("value")) {
+            oldWrappedValue["value"]
+        } else {
+            oldWrappedValue
+        }
         val valueChanged = oldValue?.toString() != value.toString()
         
         android.util.Log.d("DynamicFormViewModel", "Value changed: $valueChanged (old: '$oldValue', new: '$value')")
@@ -226,7 +241,8 @@ class DynamicFormViewModel @Inject constructor(
 
         _uiState.update { currentState ->
             val newFormData = currentState.formData.toMutableMap().apply {
-                put(finalId, value)
+                // Wrap value in { "value": ... } object
+                put(finalId, mapOf("value" to value))
                 
                 // Reset verification status when field value changes
                 // For VERIFIED_INPUT and API_VERIFICATION fields, reset {finalId}_verified
@@ -337,7 +353,13 @@ class DynamicFormViewModel @Inject constructor(
             }
 
             // Use the current value from state (which should be updated by updateFieldValue)
-            val currentValue = state.formData[finalId] ?: value
+            // Unwrap value from { "value": ... } object
+            val wrappedValue = state.formData[finalId]
+            val currentValue = if (wrappedValue is Map<*, *> && wrappedValue.containsKey("value")) {
+                wrappedValue["value"]
+            } else {
+                wrappedValue ?: value
+            }
             
             // Validate using current state
             val isFieldEnabled = if (field.enabledWhen.isNotEmpty()) {
@@ -553,7 +575,13 @@ class DynamicFormViewModel @Inject constructor(
                 section.fields.forEach { field ->
                     val key =
                         if (section.repeatable) "${field.id}_$index" else field.id
-                    val value = state.formData[key]
+                    val wrappedValue = state.formData[key]
+                    // Unwrap value from { "value": ... } object
+                    val value = if (wrappedValue is Map<*, *> && wrappedValue.containsKey("value")) {
+                        wrappedValue["value"]
+                    } else {
+                        wrappedValue
+                    }
 
                     val error = validateSingleField(field, value, if (section.repeatable) index else null)
                     if (error != null) {
@@ -616,7 +644,16 @@ class DynamicFormViewModel @Inject constructor(
             kotlinx.coroutines.delay(800)
             
             // Update dummy JSON with form data for testing
-            formDataSource.updateFormData(screen.screenId, state.formData.filterValues { it != null }.mapValues { it.value!! })
+            // Unwrap values from { "value": ... } objects before sending to backend
+            val unwrappedFormData = state.formData.filterValues { it != null }.mapValues { entry ->
+                val wrapped = entry.value!!
+                if (wrapped is Map<*, *> && wrapped.containsKey("value")) {
+                    wrapped["value"]!!
+                } else {
+                    wrapped
+                }
+            }
+            formDataSource.updateFormData(screen.screenId, unwrappedFormData)
             
             // Determine next screen based on form data for conditional navigation
             // Example: Identity → Business (if salaried) or Identity → Employment (if self-employed)
@@ -653,7 +690,8 @@ class DynamicFormViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 formData = state.formData.toMutableMap().apply {
-                    put(fieldId, value)
+                    // Wrap value in { "value": ... } object
+                    put(fieldId, mapOf("value" to value))
                 }
             )
         }
