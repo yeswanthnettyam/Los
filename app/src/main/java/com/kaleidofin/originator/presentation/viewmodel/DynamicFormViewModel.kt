@@ -362,11 +362,11 @@ class DynamicFormViewModel @Inject constructor(
                         null
                     }
                 } else if (field.type == "NUMBER" && currentValue is String && currentValue.isNotBlank()) {
-                    val num = currentValue.toIntOrNull()
+                    // Check length constraints first
                     when {
-                        num == null -> "${field.label} must be a number"
-                        field.min != null && num < field.min -> "${field.label} ≥ ${field.min}"
-                        field.max != null && num > field.max -> "${field.label} ≤ ${field.max}"
+                        field.min != null && currentValue.length < field.min -> "${field.label} must be at least ${field.min} characters"
+                        field.max != null && currentValue.length > field.max -> "${field.label} must be at most ${field.max} characters"
+                        !currentValue.all { it.isDigit() } -> "${field.label} must be a number"
                         else -> null
                     }
                 } else {
@@ -413,9 +413,29 @@ class DynamicFormViewModel @Inject constructor(
         }
 
         if (field.type == "NUMBER" && value is String && value.isNotBlank()) {
-            val num = value.toIntOrNull() ?: return "${field.label} must be a number"
-            field.min?.let { if (num < it) return "${field.label} ≥ $it" }
-            field.max?.let { if (num > it) return "${field.label} ≤ $it" }
+            // For NUMBER fields, min/max are used for length constraints
+            // Check length constraints first
+            field.min?.let { minLength ->
+                if (value.length < minLength) {
+                    return "${field.label} must be at least $minLength characters"
+                }
+            }
+            field.max?.let { maxLength ->
+                if (value.length > maxLength) {
+                    return "${field.label} must be at most $maxLength characters"
+                }
+            }
+            
+            // Then check if it's a valid number (only digits)
+            if (!value.all { it.isDigit() }) {
+                return "${field.label} must be a number"
+            }
+            
+            // Convert to number for potential numeric value validation
+            val num = value.toIntOrNull()
+            if (num == null && value.isNotEmpty()) {
+                return "${field.label} must be a valid number"
+            }
         }
         
         // Validate maxLength for text fields (including VERIFIED_INPUT and API_VERIFICATION)
@@ -425,8 +445,8 @@ class DynamicFormViewModel @Inject constructor(
             }
         }
         
-        // Validate min/max length for string fields
-        if (value is String && value.isNotBlank()) {
+        // Validate min/max length for string fields (non-NUMBER types)
+        if (field.type != "NUMBER" && value is String && value.isNotBlank()) {
             field.min?.let { minLength ->
                 if (value.length < minLength) {
                     return "${field.label} must be at least $minLength characters"
@@ -439,6 +459,78 @@ class DynamicFormViewModel @Inject constructor(
             }
         }
 
+        return null
+    }
+
+    /* ---------------- FORM-LEVEL VALIDATION ---------------- */
+
+    /**
+     * Validate a form-level validation rule
+     * @return Error message if validation fails, null if passes
+     */
+    private fun validateFormLevelRule(
+        rule: com.kaleidofin.originator.domain.model.FormValidationRule,
+        formData: Map<String, Any?>,
+        screen: com.kaleidofin.originator.domain.model.FormScreen
+    ): String? {
+        val fieldId = rule.fieldId ?: return null
+        
+        return when (rule.type) {
+            "REQUIRES_VERIFICATION" -> {
+                // Check if the field is verified
+                // For VERIFIED_INPUT and API_VERIFICATION fields, check for {fieldId}_verified or {fieldId}_{index}_verified
+                // Check base field first
+                var verifiedStatus = formData["${fieldId}_verified"] as? Boolean ?: false
+                
+                // If not verified, check all possible instances in repeatable sections
+                if (!verifiedStatus) {
+                    // Check all keys that match the pattern {fieldId}_*_verified
+                    verifiedStatus = formData.keys.any { key ->
+                        key.startsWith("${fieldId}_") && key.endsWith("_verified") && 
+                        (formData[key] as? Boolean ?: false)
+                    }
+                }
+                
+                if (!verifiedStatus) {
+                    // Find the field to get its label
+                    val field = findFieldById(fieldId, screen)
+                    val errorMessage = rule.message ?: "${field?.label ?: fieldId} must be verified"
+                    errorMessage
+                } else {
+                    null
+                }
+            }
+            // Add more validation types here as needed
+            else -> {
+                // Unknown validation type - log and return null (pass)
+                android.util.Log.w("DynamicFormViewModel", "Unknown form-level validation type: ${rule.type}")
+                null
+            }
+        }
+    }
+
+    /**
+     * Find a field by ID in sections and subsections recursively
+     */
+    private fun findFieldById(
+        fieldId: String,
+        screen: com.kaleidofin.originator.domain.model.FormScreen
+    ): com.kaleidofin.originator.domain.model.FormField? {
+        fun searchInSection(section: com.kaleidofin.originator.domain.model.FormSection): com.kaleidofin.originator.domain.model.FormField? {
+            // Check fields in this section
+            section.fields.forEach { field ->
+                if (field.id == fieldId) return field
+            }
+            // Check subsections recursively
+            section.subSections.forEach { subSection ->
+                searchInSection(subSection)?.let { return it }
+            }
+            return null
+        }
+        
+        screen.sections.forEach { section ->
+            searchInSection(section)?.let { return it }
+        }
         return null
     }
 
@@ -477,11 +569,41 @@ class DynamicFormViewModel @Inject constructor(
         
         screen.sections.forEach { validateSection(it) }
 
+        // Step 1: Field-level validation - if errors exist, stop here
         if (errors.isNotEmpty()) {
             _uiState.update {
                 it.copy(
                     fieldErrors = errors,
                     firstErrorFieldId = firstError,
+                    error = "Please correct highlighted fields"
+                )
+            }
+            return
+        }
+
+        // Step 2: Form-level validation (only if field-level validation passes)
+        val formValidationErrors = mutableMapOf<String, String>()
+        var firstFormError: String? = null
+        
+        screen.validations?.rules?.forEach { rule ->
+            // Only execute validations with executionTarget = "FRONTEND"
+            if (rule.executionTarget == "FRONTEND") {
+                val validationError = validateFormLevelRule(rule, state.formData, screen)
+                if (validationError != null && rule.fieldId != null) {
+                    formValidationErrors[rule.fieldId] = validationError
+                    if (firstFormError == null) firstFormError = rule.fieldId
+                }
+            }
+        }
+
+        // If form-level validation fails, show errors and stop
+        if (formValidationErrors.isNotEmpty()) {
+            _uiState.update {
+                it.copy(
+                    fieldErrors = it.fieldErrors.toMutableMap().apply {
+                        putAll(formValidationErrors)
+                    },
+                    firstErrorFieldId = firstFormError ?: it.firstErrorFieldId,
                     error = "Please correct highlighted fields"
                 )
             }

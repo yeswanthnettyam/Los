@@ -12,7 +12,8 @@ fun FormScreenDto.toDomain(): FormScreen {
         hiddenFields = hiddenFields?.map { it.toDomain() } ?: emptyList(),
         sections = actualSections.map { it.toDomain() },
         actions = actualActions.map { it.toDomain() },
-        modals = modals?.map { it.toDomain() } ?: emptyList()
+        modals = modals?.map { it.toDomain() } ?: emptyList(),
+        validations = validations?.toDomain()
     )
 }
 
@@ -89,8 +90,22 @@ fun FieldDto.toDomain(): FormField {
         dateMode = actualDateMode,
         minDate = actualMinDate,
         maxDate = actualMaxDate,
+        dateConfig = dateConfig?.toDomain(),
         verifiedInputConfig = verifiedInputConfig?.toDomain(),
         apiVerificationConfig = apiVerificationConfig?.toDomain()
+    )
+}
+
+fun DateConfigDto.toDomain(): com.kaleidofin.originator.domain.model.DateConfig {
+    return com.kaleidofin.originator.domain.model.DateConfig(
+        format = format,
+        validationType = validationType,
+        minAge = minAge,
+        maxAge = maxAge,
+        minDate = minDate,
+        maxDate = maxDate,
+        offset = offset,
+        unit = unit
     )
 }
 
@@ -282,5 +297,22 @@ fun ApiVerificationConfigDto.toDomain(): com.kaleidofin.originator.domain.model.
         },
         messages = messages,
         showDialog = showDialog
+    )
+}
+
+fun FormValidationsDto.toDomain(): com.kaleidofin.originator.domain.model.FormValidations {
+    return com.kaleidofin.originator.domain.model.FormValidations(
+        rules = rules?.map { it.toDomain() } ?: emptyList()
+    )
+}
+
+fun FormValidationRuleDto.toDomain(): com.kaleidofin.originator.domain.model.FormValidationRule {
+    return com.kaleidofin.originator.domain.model.FormValidationRule(
+        id = id,
+        fieldId = fieldId,
+        type = type,
+        message = message,
+        pattern = pattern,
+        executionTarget = executionTarget
     )
 }

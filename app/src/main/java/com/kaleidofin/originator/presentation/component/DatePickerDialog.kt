@@ -6,44 +6,73 @@ import androidx.compose.ui.Modifier
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import com.kaleidofin.originator.domain.model.FieldConstraints
+import com.kaleidofin.originator.domain.model.DateConfig
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DatePickerDialog(
     initialSelectedDateMillis: Long? = null,
-    dateMode: String? = null,                 // ANY | PAST | FUTURE | RANGE | AGE
-    constraints: FieldConstraints? = null,    // used for AGE
-    minDate: String? = null,                  // yyyy-MM-dd (for RANGE)
-    maxDate: String? = null,                  // yyyy-MM-dd (for RANGE)
+    dateConfig: DateConfig? = null,
     onDateSelected: (String) -> Unit,         // 🔥 ALWAYS STRING
     onDismiss: () -> Unit
 ) {
     val today = LocalDate.now()
+    val validationType = dateConfig?.validationType ?: "ANY"
 
     /* ---------------------------------------------------
-     * 1️⃣ Calculate allowed date range
+     * RUNTIME CONSTRAINT COMPUTATION (MANDATORY)
      * --------------------------------------------------- */
-    val (minDateLocal, maxDateLocal) = when (dateMode) {
-        "FUTURE" -> today to today.plusYears(100)
-
-        "PAST" -> today.minusYears(100) to today
-
-        "RANGE" -> {
-            val min = minDate?.let { LocalDate.parse(it) } ?: today.minusYears(100)
-            val max = maxDate?.let { LocalDate.parse(it) } ?: today.plusYears(100)
+    val (minDateLocal: LocalDate?, maxDateLocal: LocalDate?) = when (validationType.uppercase()) {
+        "ANY" -> {
+            // No constraints
+            null to null
+        }
+        
+        "FUTURE_ONLY", "FUTURE" -> {
+            // minDate = today, maxDate = null
+            today to null
+        }
+        
+        "PAST_ONLY", "PAST" -> {
+            // minDate = null, maxDate = today
+            null to today
+        }
+        
+        "AGE_RANGE" -> {
+            // IF minAge exists: maxDate = today - minAge years
+            // IF maxAge exists: minDate = today - maxAge years
+            val computedMinDate = dateConfig?.maxAge?.let { today.minusYears(it.toLong()) }
+            val computedMaxDate = dateConfig?.minAge?.let { today.minusYears(it.toLong()) }
+            computedMinDate to computedMaxDate
+        }
+        
+        "DATE_RANGE" -> {
+            // minDate = config.minDate, maxDate = config.maxDate
+            val min = dateConfig?.minDate?.let { 
+                try { LocalDate.parse(it) } catch (e: Exception) { null }
+            }
+            val max = dateConfig?.maxDate?.let { 
+                try { LocalDate.parse(it) } catch (e: Exception) { null }
+            }
             min to max
         }
-
-        "AGE" -> {
-            val min = today.minusYears((constraints?.maxAge ?: 100).toLong())
-            val max = today.minusYears((constraints?.minAge ?: 0).toLong())
-            min to max
+        
+        "OFFSET" -> {
+            // minDate = today + offset (MONTH), maxDate = today
+            val offset = dateConfig?.offset ?: 0
+            val unit = dateConfig?.unit?.uppercase() ?: "MONTH"
+            val computedMinDate = when (unit) {
+                "MONTH" -> today.plusMonths(offset.toLong())
+                "YEAR" -> today.plusYears(offset.toLong())
+                "DAY" -> today.plusDays(offset.toLong())
+                else -> today.plusMonths(offset.toLong())
+            }
+            computedMinDate to today
         }
-
+        
         else -> {
-            // ANY or null
-            today.minusYears(50) to today.plusYears(50)
+            // Fallback: ANY (no constraints)
+            null to null
         }
     }
 
@@ -52,17 +81,25 @@ fun DatePickerDialog(
      * --------------------------------------------------- */
     val safeInitialDate = initialSelectedDateMillis
         ?.let {
-            Instant.ofEpochMilli(it)
+            val parsedDate = Instant.ofEpochMilli(it)
                 .atZone(ZoneId.systemDefault())
                 .toLocalDate()
-                .coerceIn(minDateLocal, maxDateLocal)
+            
+            // Coerce within bounds if constraints exist
+            when {
+                minDateLocal != null && maxDateLocal != null -> parsedDate.coerceIn(minDateLocal, maxDateLocal)
+                minDateLocal != null -> parsedDate.coerceAtLeast(minDateLocal)
+                maxDateLocal != null -> parsedDate.coerceAtMost(maxDateLocal)
+                else -> parsedDate
+            }
         }
-        ?: when (dateMode) {
-            "AGE" -> maxDateLocal                 // DOB → safe past date
-            "PAST" -> today.minusYears(1)         // ❌ not today
-            "FUTURE" -> today.plusDays(1)         // ❌ not today
-            "RANGE" -> minDateLocal.plusDays(1)   // ❌ not edge
-            else -> today.minusYears(1)            // ANY
+        ?: when (validationType.uppercase()) {
+            "AGE_RANGE" -> maxDateLocal ?: today.minusYears(1)  // DOB → safe past date
+            "PAST_ONLY", "PAST" -> today.minusDays(1)          // ❌ not today
+            "FUTURE_ONLY", "FUTURE" -> today.plusDays(1)        // ❌ not today
+            "DATE_RANGE" -> minDateLocal?.plusDays(1) ?: today.minusYears(1)  // ❌ not edge
+            "OFFSET" -> minDateLocal?.plusDays(1) ?: today.plusDays(1)
+            else -> today.minusYears(1)                         // ANY
         }
 
     val initialMillis =
@@ -72,13 +109,20 @@ fun DatePickerDialog(
             .toEpochMilli()
 
     /* ---------------------------------------------------
-     * 3️⃣ DatePicker state
+     * 3️⃣ DatePicker state with computed year range
      * --------------------------------------------------- */
+    val yearRange = when {
+        minDateLocal != null && maxDateLocal != null -> IntRange(minDateLocal.year, maxDateLocal.year)
+        minDateLocal != null -> IntRange(minDateLocal.year, today.year + 10)
+        maxDateLocal != null -> IntRange(1900, maxDateLocal.year)
+        else -> IntRange(1900, today.year + 10) // Default range for ANY
+    }
+    
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = initialMillis,
-        yearRange = minDateLocal.year..maxDateLocal.year
+        yearRange = yearRange
     )
-
+    
     /* ---------------------------------------------------
      * 4️⃣ Dialog UI
      * --------------------------------------------------- */
@@ -93,11 +137,21 @@ fun DatePickerDialog(
                             Instant.ofEpochMilli(millis)
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDate()
-
-                        // 🔥 ALWAYS store as STRING
-                        onDateSelected(selectedDate.toString()) // yyyy-MM-dd
+                        
+                        // Validate date is within constraints
+                        val isValid = (minDateLocal == null || !selectedDate.isBefore(minDateLocal)) &&
+                                     (maxDateLocal == null || !selectedDate.isAfter(maxDateLocal))
+                        
+                        if (isValid) {
+                            // 🔥 ALWAYS store as STRING
+                            onDateSelected(selectedDate.toString()) // yyyy-MM-dd
+                            onDismiss()
+                        }
+                        // If invalid, don't dismiss - user can select another date
+                    } ?: run {
+                        // No date selected, just dismiss
+                        onDismiss()
                     }
-                    onDismiss()
                 }
             ) {
                 Text("OK")

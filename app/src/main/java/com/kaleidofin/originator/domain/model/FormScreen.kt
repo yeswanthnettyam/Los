@@ -8,7 +8,8 @@ data class FormScreen(
     val hiddenFields: List<HiddenField>,
     val sections: List<FormSection>,
     val actions: List<FormAction>,
-    val modals: List<FormModal>
+    val modals: List<FormModal>,
+    val validations: FormValidations? = null
 )
 
 data class FormLayout(
@@ -73,6 +74,7 @@ data class FormField(
     val dateMode: String?,
     val minDate: String?,
     val maxDate: String?,
+    val dateConfig: DateConfig? = null,
     val verifiedInputConfig: VerifiedInputConfig? = null,
     val apiVerificationConfig: ApiVerificationConfig? = null
 )
@@ -110,6 +112,17 @@ data class FieldValidation(
 data class FieldConstraints(
     val minAge: Int?,
     val maxAge: Int?
+)
+
+data class DateConfig(
+    val format: String?,
+    val validationType: String?,
+    val minAge: Int?,
+    val maxAge: Int?,
+    val minDate: String?,
+    val maxDate: String?,
+    val offset: Int?,
+    val unit: String?
 )
 
 data class FormAction(
@@ -215,4 +228,17 @@ data class ApiVerificationConfig(
 data class ApiVerificationSuccessCondition(
     val field: String?,
     val equals: String?
+)
+
+data class FormValidations(
+    val rules: List<FormValidationRule>
+)
+
+data class FormValidationRule(
+    val id: String?,
+    val fieldId: String?,
+    val type: String,
+    val message: String?,
+    val pattern: String?,
+    val executionTarget: String?
 )

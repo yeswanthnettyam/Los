@@ -20,7 +20,8 @@ data class FormScreenDto(
     @SerializedName("createdAt") val createdAt: String? = null,
     @SerializedName("updatedAt") val updatedAt: String? = null,
     @SerializedName("createdBy") val createdBy: String? = null,
-    @SerializedName("updatedBy") val updatedBy: String? = null
+    @SerializedName("updatedBy") val updatedBy: String? = null,
+    @SerializedName("validations") val validations: FormValidationsDto? = null
 ) {
     // Helper properties to get values from ui or direct
     val actualLayout: FormLayoutDto
@@ -355,8 +356,12 @@ data class FieldConstraintsDto(
 data class DateConfigDto(
     @SerializedName("format") val format: String? = null,
     @SerializedName("validationType") val validationType: String? = null,
+    @SerializedName("minAge") val minAge: Int? = null,
+    @SerializedName("maxAge") val maxAge: Int? = null,
     @SerializedName("minDate") val minDate: String? = null,
-    @SerializedName("maxDate") val maxDate: String? = null
+    @SerializedName("maxDate") val maxDate: String? = null,
+    @SerializedName("offset") val offset: Int? = null,
+    @SerializedName("unit") val unit: String? = null
 )
 
 data class VerifiedInputConfigDto(
@@ -459,4 +464,17 @@ data class ScopeDto(
     @SerializedName("productCode") val productCode: String? = null,
     @SerializedName("partnerCode") val partnerCode: String? = null,
     @SerializedName("branchCode") val branchCode: String? = null
+)
+
+data class FormValidationsDto(
+    @SerializedName("rules") val rules: List<FormValidationRuleDto>? = emptyList()
+)
+
+data class FormValidationRuleDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("fieldId") val fieldId: String? = null,
+    @SerializedName("type") val type: String,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("pattern") val pattern: String? = null,
+    @SerializedName("executionTarget") val executionTarget: String? = null
 )

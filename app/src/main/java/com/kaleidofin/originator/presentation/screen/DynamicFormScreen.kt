@@ -53,10 +53,7 @@ fun DynamicFormScreen(
     // Date picker state
     var showDatePicker by remember { mutableStateOf(false) }
     var datePickerFieldId by remember { mutableStateOf<String?>(null) }
-    var datePickerConstraints by remember { mutableStateOf<com.kaleidofin.originator.domain.model.FieldConstraints?>(null) }
-    var datePickerMode by remember { mutableStateOf<String?>(null) }
-    var datePickerMinDate by remember { mutableStateOf<String?>(null) }
-    var datePickerMaxDate by remember { mutableStateOf<String?>(null) }
+    var datePickerConfig by remember { mutableStateOf<com.kaleidofin.originator.domain.model.DateConfig?>(null) }
 
     // Verified input state
     var showConsentDialog by remember { mutableStateOf(false) }
@@ -195,14 +192,14 @@ fun DynamicFormScreen(
         },
 
         bottomBar = {
-            if (formScreen?.layout?.stickyFooter == true) {
+            formScreen?.let { screen ->
                 Surface(shadowElevation = 8.dp) {
                     PrimaryButton(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
                             .navigationBarsPadding(),
-                        text = formScreen.layout.submitButtonText,
+                        text = screen.layout.submitButtonText,
                         onClick = { viewModel.submitForm() },
                         isLoading = uiState.isSubmitting
                     )
@@ -278,10 +275,7 @@ fun DynamicFormScreen(
                                     },
                                     onDateClick = { fieldKey, field ->
                                         datePickerFieldId = fieldKey
-                                        datePickerConstraints = field.constraints
-                                        datePickerMode = field.dateMode
-                                        datePickerMinDate = field.minDate
-                                        datePickerMaxDate = field.maxDate
+                                        datePickerConfig = field.dateConfig
                                         showDatePicker = true
                                     },
                                     onVerifyClick = { fieldIdForVerify, fieldValue ->
@@ -373,17 +367,8 @@ fun DynamicFormScreen(
                         }
                     }
 
-                    // Non-sticky submit
-                    if (!formScreen.layout.stickyFooter) {
-                        Spacer(Modifier.height(24.dp))
-                        PrimaryButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            text = formScreen.layout.submitButtonText,
-                            onClick = { viewModel.submitForm() },
-                            isLoading = uiState.isSubmitting
-                        )
-                        Spacer(Modifier.height(32.dp))
-                    }
+                    // Add bottom padding to account for sticky submit button
+                    Spacer(Modifier.height(80.dp))
                 }
                 
                 // Handle modals
@@ -413,6 +398,7 @@ fun DynamicFormScreen(
                     
                     DatePickerDialog(
                         initialSelectedDateMillis = selectedDateMillis,
+                        dateConfig = datePickerConfig,
                         onDateSelected = { dateString ->
 
                             // dateString is already "yyyy-MM-dd"
@@ -431,22 +417,12 @@ fun DynamicFormScreen(
 
                             showDatePicker = false
                             datePickerFieldId = null
-                            datePickerConstraints = null
-                            datePickerMode = null
-                            datePickerMinDate = null
-                            datePickerMaxDate = null
+                            datePickerConfig = null
                         },
-                                dateMode = datePickerMode,
-                        constraints = datePickerConstraints,
-                        minDate = datePickerMinDate,
-                        maxDate = datePickerMaxDate,
                         onDismiss = {
                             showDatePicker = false
                             datePickerFieldId = null
-                            datePickerConstraints = null
-                            datePickerMode = null
-                            datePickerMinDate = null
-                            datePickerMaxDate = null
+                            datePickerConfig = null
                         }
                     )
                 }
