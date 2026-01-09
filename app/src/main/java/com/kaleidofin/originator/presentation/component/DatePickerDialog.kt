@@ -56,7 +56,7 @@ fun DatePickerDialog(
             }
             min to max
         }
-        
+
         "OFFSET" -> {
             // minDate = today + offset (MONTH), maxDate = today
             val offset = dateConfig?.offset ?: 0
@@ -69,7 +69,7 @@ fun DatePickerDialog(
             }
             computedMinDate to today
         }
-        
+
         else -> {
             // Fallback: ANY (no constraints)
             null to null
@@ -122,7 +122,7 @@ fun DatePickerDialog(
         initialSelectedDateMillis = initialMillis,
         yearRange = yearRange
     )
-    
+
     /* ---------------------------------------------------
      * 4️⃣ Dialog UI
      * --------------------------------------------------- */
@@ -137,14 +137,14 @@ fun DatePickerDialog(
                             Instant.ofEpochMilli(millis)
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDate()
-                        
+
                         // Validate date is within constraints
                         val isValid = (minDateLocal == null || !selectedDate.isBefore(minDateLocal)) &&
                                      (maxDateLocal == null || !selectedDate.isAfter(maxDateLocal))
                         
                         if (isValid) {
-                            // 🔥 ALWAYS store as STRING
-                            onDateSelected(selectedDate.toString()) // yyyy-MM-dd
+                        // 🔥 ALWAYS store as STRING
+                        onDateSelected(selectedDate.toString()) // yyyy-MM-dd
                             onDismiss()
                         }
                         // If invalid, don't dismiss - user can select another date
