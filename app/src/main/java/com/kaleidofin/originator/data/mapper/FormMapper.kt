@@ -130,7 +130,15 @@ fun DataSourceDto.toDomain(): FieldDataSource {
         endpoint = actualEndpoint,
         method = method,
         dependsOn = dependsOn,
-        paramKey = paramKey
+        paramKey = paramKey,
+        staticData = staticData?.map { it.toDomain() }
+    )
+}
+
+fun StaticDataItemDto.toDomain(): com.kaleidofin.originator.domain.model.StaticDataItem {
+    return com.kaleidofin.originator.domain.model.StaticDataItem(
+        value = value,
+        label = label
     )
 }
 

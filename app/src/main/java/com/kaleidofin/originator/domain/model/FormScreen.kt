@@ -93,7 +93,13 @@ data class FieldDataSource(
     val endpoint: String?, // For API
     val method: String?, // For API
     val dependsOn: String?, // For API
-    val paramKey: String? // For API
+    val paramKey: String?, // For API
+    val staticData: List<StaticDataItem>? = null // For STATIC_JSON (value/label pairs)
+)
+
+data class StaticDataItem(
+    val value: String,
+    val label: String
 )
 
 /**

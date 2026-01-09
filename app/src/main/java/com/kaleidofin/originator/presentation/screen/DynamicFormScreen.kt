@@ -980,6 +980,19 @@ private fun DynamicFormFieldRenderer(
                 onBlur = onBlur
             )
         }
+        "RADIO" -> {
+            DynamicRadioField(
+                field = field,
+                value = value,
+                error = error,
+                modifier = Modifier.focusRequester(focusRequester),
+                isEnabled = isEnabled,
+                onValueChange = { newValue ->
+                    onValueChange(newValue)
+                },
+                onBlur = onBlur
+            )
+        }
         else -> {
             DynamicFormField(
                 field = field,

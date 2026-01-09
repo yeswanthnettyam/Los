@@ -37,6 +37,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.ui.Alignment
@@ -83,10 +84,11 @@ fun DynamicFormField(
         }
     }
 
-    val keyboardType = when (field.keyboard) {
-        "PHONE" -> KeyboardType.Phone
-        "NUMBER" -> KeyboardType.Number
-        "EMAIL" -> KeyboardType.Email
+    val keyboardType = when {
+        field.type == "NUMBER" -> KeyboardType.Number
+        field.keyboard == "PHONE" -> KeyboardType.Phone
+        field.keyboard == "NUMBER" -> KeyboardType.Number
+        field.keyboard == "EMAIL" -> KeyboardType.Email
         else -> KeyboardType.Text
     }
 
@@ -657,6 +659,74 @@ fun DynamicVerifiedInputField(
             { Text(it, color = Color(0xFFB00020)) }
         }
     )
+}
+
+@Composable
+fun DynamicRadioField(
+    field: FormField,
+    value: Any?,
+    error: String?,
+    onValueChange: (String) -> Unit,
+    onBlur: () -> Unit,
+    modifier: Modifier = Modifier,
+    isEnabled: Boolean = true
+) {
+    // Get options from staticData (value/label pairs) or fallback to values (labels only)
+    val options = field.dataSource?.staticData ?: field.dataSource?.values?.map { 
+        com.kaleidofin.originator.domain.model.StaticDataItem(value = it, label = it) 
+    } ?: emptyList()
+    
+    val selectedValue = value?.toString() ?: ""
+    
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Label
+        Text(
+            text = field.label + if (field.required) " *" else "",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        
+        // Radio buttons
+        options.forEach { option ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = isEnabled) {
+                        onValueChange(option.value)
+                        onBlur()
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = selectedValue == option.value,
+                    onClick = {
+                        if (isEnabled) {
+                            onValueChange(option.value)
+                            onBlur()
+                        }
+                    },
+                    enabled = isEnabled
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = option.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        
+        // Error message
+        if (error != null) {
+            Text(
+                text = error,
+                color = Color(0xFFB00020),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 48.dp, top = 4.dp)
+            )
+        }
+    }
 }
 
 
