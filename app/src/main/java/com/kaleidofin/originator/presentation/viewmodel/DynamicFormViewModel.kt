@@ -19,12 +19,26 @@ import com.kaleidofin.originator.data.mapper.toDomain
 // FlowStep data class removed - navigation is now backend-driven
 // Keeping for potential future use if needed, but flow stack management is removed
 
+/**
+ * Local navigation stack entry for managing back navigation
+ * Android maintains this stack locally; backend manages flow snapshot
+ */
+data class NavigationStackEntry(
+    val screenId: String,
+    val screenConfig: com.kaleidofin.originator.data.dto.FormScreenDto,
+    val formData: Map<String, Any>? = null // Store form data for back navigation restoration
+)
+
 @HiltViewModel
 class DynamicFormViewModel @Inject constructor(
     private val getFormConfigurationUseCase: GetFormConfigurationUseCase,
     private val getMasterDataUseCase: GetMasterDataUseCase,
-    private val formDataSource: FormDataSource // For testing: Update dummy JSON
+    private val formDataSource: FormDataSource
 ) : ViewModel() {
+    
+    // Local navigation stack for back navigation
+    // Backend manages flow snapshot; Android uses this for local back button handling
+    private val _navigationStack = mutableListOf<NavigationStackEntry>()
     
     // Helper method to load screen config from DTO (from Flow API responses)
     // This method processes screenConfig from Flow Engine APIs without making additional API calls
@@ -163,6 +177,10 @@ class DynamicFormViewModel @Inject constructor(
 
     // Start flow using Flow Engine /flow/start API
     // Returns flowId, currentScreenId, and full screenConfig in single response
+    /**
+     * Start flow using Runtime API (POST /runtime/next-screen with currentScreenId = null)
+     * Clears navigation stack and loads initial screen
+     */
     fun startFlow(applicationId: String, flowType: String? = null) {
         viewModelScope.launch {
             _uiState.update { 
@@ -173,8 +191,25 @@ class DynamicFormViewModel @Inject constructor(
             }
             
             try {
-                // Call Flow Engine /flow/start API - returns flowId, currentScreenId, and full screenConfig
-                val response = formDataSource.startFlow(applicationId, flowType)
+                // Clear navigation stack for new flow
+                _navigationStack.clear()
+                
+                // Call Runtime API - POST /runtime/next-screen with currentScreenId = null
+                // Backend evaluates flow, resolves config, manages snapshot
+                val response = formDataSource.nextScreen(
+                    applicationId = applicationId,
+                    currentScreenId = null, // null for first load
+                    formData = null
+                )
+                
+                // Push initial screen to navigation stack
+                _navigationStack.add(
+                    NavigationStackEntry(
+                        screenId = response.nextScreenId,
+                        screenConfig = response.screenConfig,
+                        formData = null
+                    )
+                )
                 
                 // Load screen config directly from response - NO separate API call
                 loadScreenFromDto(response.screenConfig, restoreData = null)
@@ -542,12 +577,12 @@ class DynamicFormViewModel @Inject constructor(
                         "${field.label} must be a number"
                     } else {
                         // Convert to number for numeric value validation
-                        val num = currentValue.toIntOrNull()
+                    val num = currentValue.toIntOrNull()
                         if (num == null) {
                             "${field.label} must be a valid number"
                         } else {
                             // For NUMBER fields, validate numeric value constraints using min/max
-                            when {
+                    when {
                                 field.min != null && num < field.min -> "${field.label} must be at least ${field.min}"
                                 field.max != null && num > field.max -> "${field.label} must be at most ${field.max}"
                                 // Also validate length constraints for NUMBER fields
@@ -872,8 +907,8 @@ class DynamicFormViewModel @Inject constructor(
             return
         }
 
-        // ✅ success flow - call Flow Engine /flow/next API
-        // Flow Engine will evaluate conditions and return next screen with full screenConfig
+        // ✅ success flow - call Runtime API (POST /runtime/next-screen)
+        // Backend evaluates flow conditions and returns next screen with full screenConfig
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, error = null) }
             
@@ -894,8 +929,22 @@ class DynamicFormViewModel @Inject constructor(
                 // TODO: Get applicationId from proper source (currently using placeholder)
                 val applicationId = "placeholder-application-id" // Replace with actual applicationId
                 
-                // Call Flow Engine /flow/next API - returns flowId, currentScreenId, and full screenConfig
-                val response = formDataSource.navigateNext(applicationId, screen.screenId, unwrappedFormData)
+                // Call Runtime API - POST /runtime/next-screen
+                // Backend evaluates flow, resolves config, manages snapshot
+                val response = formDataSource.nextScreen(
+                    applicationId = applicationId,
+                    currentScreenId = screen.screenId,
+                    formData = unwrappedFormData
+                )
+                
+                // Push next screen to navigation stack (for local back navigation)
+                _navigationStack.add(
+                    NavigationStackEntry(
+                        screenId = response.nextScreenId,
+                        screenConfig = response.screenConfig,
+                        formData = state.formData // Store wrapped form data for potential restoration
+                    )
+                )
                 
                 // Load next screen config directly from response - NO separate API call
                 loadScreenFromDto(response.screenConfig, restoreData = null)
@@ -904,7 +953,7 @@ class DynamicFormViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        nextScreen = response.currentScreenId
+                        nextScreen = response.nextScreenId
                     )
                 }
             } catch (e: Exception) {
@@ -1038,29 +1087,46 @@ class DynamicFormViewModel @Inject constructor(
         return data
     }
     
+    /**
+     * Handle back navigation using local stack
+     * Android manages local navigation; backend manages flow snapshot
+     * 
+     * Rules:
+     * 1. If stack has previous screen -> pop and restore
+     * 2. If at start screen -> exit flow (handled by UI)
+     * 3. Backend snapshot allows editing previous screens
+     */
     fun handleBackNavigation(
         applicationId: String,
         onNavigateToScreen: (String) -> Unit,
+        onExitFlow: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val currentScreenId = _uiState.value.formScreen?.screenId
-        if (currentScreenId == null) {
-            onError("No current screen available")
-            return
-        }
-        
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
                 
-                // Call Flow Engine API for back navigation - returns flowId, currentScreenId, and full screenConfig
-                val response = formDataSource.navigateBack(applicationId, currentScreenId)
+                // Check if we can go back (need at least 2 items in stack: previous + current)
+                if (_navigationStack.size <= 1) {
+                    // At start screen - exit flow
+                    _navigationStack.clear()
+                    _uiState.update { it.copy(isLoading = false) }
+                    onExitFlow()
+                    return@launch
+                }
                 
-                // Load screen config directly from response - NO separate API call
-                loadScreenFromDto(response.screenConfig, restoreData = null)
+                // Pop current screen from stack
+                _navigationStack.removeAt(_navigationStack.size - 1)
                 
-                // Navigate to the previous screen
-                onNavigateToScreen(response.currentScreenId)
+                // Get previous screen from stack
+                val previousEntry = _navigationStack.last()
+                
+                // Load previous screen config (already resolved by backend during forward navigation)
+                // Backend snapshot allows editing this screen again
+                loadScreenFromDto(previousEntry.screenConfig, restoreData = previousEntry.formData)
+                
+                // Navigate to previous screen
+                onNavigateToScreen(previousEntry.screenId)
                 
                 _uiState.update { it.copy(isLoading = false) }
             } catch (e: Exception) {
@@ -1073,6 +1139,14 @@ class DynamicFormViewModel @Inject constructor(
                 onError(e.message ?: "Failed to navigate back")
             }
         }
+    }
+    
+    /**
+     * Check if back navigation is possible
+     * Returns true if there are previous screens in the stack
+     */
+    fun canNavigateBack(): Boolean {
+        return _navigationStack.size > 1
     }
     
     /* ---------------- OTP VERIFICATION ---------------- */

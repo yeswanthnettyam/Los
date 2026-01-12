@@ -48,7 +48,24 @@ import com.kaleidofin.originator.presentation.viewmodel.HomeViewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.res.painterResource
 import com.kaleidofin.originator.R
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import com.kaleidofin.originator.presentation.component.DashboardFlowCard
+import kotlinx.coroutines.launch
 
+/**
+ * HomeScreen - Backend-driven dashboard
+ * 
+ * Displays flows from GET /api/v1/dashboard/flows
+ * Each flow rendered with:
+ * - Custom colors from dashboardMeta.ui
+ * - Icon from IconRegistry mapping
+ * - Dynamic title/description
+ * 
+ * On click: Calls Runtime API with currentScreenId = "__START__"
+ */
 @Composable
 fun HomeScreen(
     onNavigateBack: () -> Unit,
@@ -56,8 +73,14 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState = viewModel.uiState.collectAsState().value
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    
+    // TODO: Get applicationId from proper source (e.g., SharedPreferences, Auth state)
+    val applicationId = remember { "placeholder-application-id" }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             HomeTopBar(onBackClick = onNavigateBack)
         }
@@ -95,25 +118,54 @@ fun HomeScreen(
                         )
                     }
                 }
+            } else if (uiState.dashboardFlows.isEmpty()) {
+                // Empty state - no flows available
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "No flows available",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Check back later for available workflows",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             } else {
-                val layout = uiState.layout
-                val columns = layout?.columns ?: 2
-                val spacing = layout?.spacingDp?.dp ?: 16.dp
-                
+                // Render dashboard flows dynamically
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
-                    verticalArrangement = Arrangement.spacedBy(spacing),
-                    horizontalArrangement = Arrangement.spacedBy(spacing),
+                    columns = GridCells.Fixed(2),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    items(uiState.actions) { action ->
-                        ActionCard(
-                            action = action,
+                    items(uiState.dashboardFlows.size) { index ->
+                        val flow = uiState.dashboardFlows[index]
+                        DashboardFlowCard(
+                            flow = flow,
                             onClick = {
-                                // Navigate based on action type
-                                if (action.actionType == "NAVIGATION") {
-                                    onNavigateToDynamicForm(action.actionTarget)
-                                }
+                                // Start flow using Runtime API with "__START__" marker
+                                viewModel.onFlowClick(
+                                    flow = flow,
+                                    applicationId = applicationId,
+                                    onSuccess = { screenId ->
+                                        // Navigate to dynamic form with resolved screenId
+                                        onNavigateToDynamicForm(screenId)
+                                    },
+                                    onError = { error ->
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar(error)
+                                        }
+                                    }
+                                )
                             }
                         )
                     }

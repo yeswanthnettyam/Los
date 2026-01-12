@@ -9,37 +9,30 @@ import javax.inject.Inject
 class FormDataSourceImpl @Inject constructor(
     private val formApiService: FormApiService
 ) : FormDataSource {
-    override suspend fun startFlow(applicationId: String, flowType: String?): FlowResponseDto {
-        return formApiService.startFlow(
-            FlowStartRequestDto(
-                applicationId = applicationId,
-                flowType = flowType
-            )
-        )
+    /**
+     * Dashboard API - Get available flows
+     * GET /api/v1/dashboard/flows
+     */
+    override suspend fun getDashboardFlows(): DashboardResponseDto {
+        return formApiService.getDashboardFlows()
     }
     
-    override suspend fun navigateNext(applicationId: String, currentScreenId: String, formData: Map<String, Any>): FlowResponseDto {
-        return formApiService.navigateNext(
-            FlowNextRequestDto(
+    /**
+     * Runtime API - Single method for all navigation
+     * Calls POST /runtime/next-screen
+     */
+    override suspend fun nextScreen(
+        applicationId: String,
+        currentScreenId: String?,
+        formData: Map<String, Any>?
+    ): NextScreenResponseDto {
+        return formApiService.nextScreen(
+            NextScreenRequestDto(
                 applicationId = applicationId,
                 currentScreenId = currentScreenId,
                 formData = formData
             )
         )
-    }
-    
-    override suspend fun navigateBack(applicationId: String, currentScreenId: String): FlowResponseDto {
-        return formApiService.navigateBack(
-            FlowBackRequestDto(
-                applicationId = applicationId,
-                currentScreenId = currentScreenId
-            )
-        )
-    }
-    
-    @Deprecated("Use startFlow() instead for navigation")
-    override suspend fun getFormConfiguration(target: String): FormScreenDto {
-        return formApiService.getFormConfiguration(target)
     }
     
     override suspend fun getMasterData(dataSource: String): Map<String, String> {
@@ -51,6 +44,43 @@ class FormDataSourceImpl @Inject constructor(
         if (formApiService is com.kaleidofin.originator.data.api.FormApiServiceDummy) {
             formApiService.updateFormData(screenId, formData)
         }
+    }
+    
+    // Legacy APIs - Deprecated: Use Runtime API instead
+    @Deprecated("Use nextScreen() instead")
+    override suspend fun startFlow(applicationId: String, flowType: String?): FlowResponseDto {
+        return formApiService.startFlow(
+            FlowStartRequestDto(
+                applicationId = applicationId,
+                flowType = flowType
+            )
+        )
+    }
+    
+    @Deprecated("Use nextScreen() instead")
+    override suspend fun navigateNext(applicationId: String, currentScreenId: String, formData: Map<String, Any>): FlowResponseDto {
+        return formApiService.navigateNext(
+            FlowNextRequestDto(
+                applicationId = applicationId,
+                currentScreenId = currentScreenId,
+                formData = formData
+            )
+        )
+    }
+    
+    @Deprecated("Use nextScreen() instead")
+    override suspend fun navigateBack(applicationId: String, currentScreenId: String): FlowResponseDto {
+        return formApiService.navigateBack(
+            FlowBackRequestDto(
+                applicationId = applicationId,
+                currentScreenId = currentScreenId
+            )
+        )
+    }
+    
+    @Deprecated("Use nextScreen() instead")
+    override suspend fun getFormConfiguration(target: String): FormScreenDto {
+        return formApiService.getFormConfiguration(target)
     }
 }
 

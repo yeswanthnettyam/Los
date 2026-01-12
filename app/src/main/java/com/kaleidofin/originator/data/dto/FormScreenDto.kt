@@ -566,34 +566,53 @@ data class FormValidationRuleDto(
     @SerializedName("executionTarget") val executionTarget: String? = null
 )
 
-// Flow Engine API DTOs - All navigation APIs return flowId, currentScreenId, and full screenConfig
+// Runtime API DTOs - Single API for all navigation
+// POST /runtime/next-screen handles:
+// 1. First load (currentScreenId = null)
+// 2. Next navigation (currentScreenId + formData)
+// 3. Backend manages flow snapshot and config resolution
+
+data class NextScreenRequestDto(
+    @SerializedName("applicationId") val applicationId: String,
+    @SerializedName("currentScreenId") val currentScreenId: String? = null, // null for first load
+    @SerializedName("formData") val formData: Map<String, Any>? = null // null for first load
+)
+
+data class NextScreenResponseDto(
+    @SerializedName("nextScreenId") val nextScreenId: String,
+    @SerializedName("screenConfig") val screenConfig: FormScreenDto
+)
+
+// Legacy Flow Engine API DTOs - Deprecated: Use Runtime API instead
+// Keep for backward compatibility with existing dummy implementations
+
+@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowResponseDto(
     @SerializedName("flowId") val flowId: String,
     @SerializedName("currentScreenId") val currentScreenId: String,
     @SerializedName("screenConfig") val screenConfig: FormScreenDto
 )
 
-// Flow Start API
+@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowStartRequestDto(
     @SerializedName("applicationId") val applicationId: String,
-    @SerializedName("flowType") val flowType: String? = null // Optional: e.g., "APPLICANT_ONBOARDING"
+    @SerializedName("flowType") val flowType: String? = null
 )
 
-// Flow Next API
+@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowNextRequestDto(
     @SerializedName("applicationId") val applicationId: String,
     @SerializedName("currentScreenId") val currentScreenId: String,
-    @SerializedName("formData") val formData: Map<String, Any> // Unwrapped form data
+    @SerializedName("formData") val formData: Map<String, Any>
 )
 
-// Flow Back API
+@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowBackRequestDto(
     @SerializedName("applicationId") val applicationId: String,
     @SerializedName("currentScreenId") val currentScreenId: String
 )
 
-// Legacy: Keep for backward compatibility but use FlowResponseDto for new code
-@Deprecated("Use FlowResponseDto instead", ReplaceWith("FlowResponseDto"))
+@Deprecated("Use Runtime API instead", ReplaceWith("NextScreenResponseDto"))
 data class BackNavigationResponseDto(
     @SerializedName("screenId") val screenId: String,
     @SerializedName("screenConfig") val screenConfig: FormScreenDto

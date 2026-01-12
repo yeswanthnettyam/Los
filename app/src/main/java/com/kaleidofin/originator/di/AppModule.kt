@@ -46,11 +46,13 @@ object AppModule {
         return HomeDataSourceImpl()
     }
 
-    @Provides
-    @Singleton
-    fun provideFormApiService(gson: Gson): FormApiService {
-        return FormApiServiceDummy(gson)
-    }
+    // FormApiService is now provided by NetworkModule (real Retrofit API)
+    // To switch back to dummy API for testing, uncomment below and remove NetworkModule
+    // @Provides
+    // @Singleton
+    // fun provideFormApiService(gson: Gson): FormApiService {
+    //     return FormApiServiceDummy(gson)
+    // }
 
     @Provides
     @Singleton

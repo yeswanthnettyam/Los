@@ -1375,6 +1375,115 @@ class FormApiServiceDummy @Inject constructor(
     }
     
     // Flow Engine APIs - All return flowId, currentScreenId, and full screenConfig
+    /**
+     * Dashboard API - Get available flows
+     * GET /api/v1/dashboard/flows
+     * 
+     * Returns dummy dashboard flows for testing
+     */
+    override suspend fun getDashboardFlows(): DashboardResponseDto {
+        delay(500) // Simulate network delay
+        
+        return DashboardResponseDto(
+            flows = listOf(
+                DashboardFlowDto(
+                    flowId = "APPLICANT_FLOW",
+                    title = "Applicant Onboarding",
+                    description = "Capture applicant personal and identity details",
+                    icon = "APPLICANT_ONBOARDING",
+                    ui = DashboardUiMetaDto(
+                        backgroundColor = "#0B2F70",
+                        textColor = "#FFFFFF",
+                        iconColor = "#00B2FF"
+                    ),
+                    startable = true,
+                    productCode = "PL",
+                    partnerCode = null,
+                    branchCode = null
+                ),
+                DashboardFlowDto(
+                    flowId = "KYC_FLOW",
+                    title = "KYC Verification",
+                    description = "Complete KYC process with document upload",
+                    icon = "KYC_CAPTURE",
+                    ui = DashboardUiMetaDto(
+                        backgroundColor = "#1E3A5F",
+                        textColor = "#FFFFFF",
+                        iconColor = "#FFD700"
+                    ),
+                    startable = true,
+                    productCode = "PL",
+                    partnerCode = null,
+                    branchCode = null
+                ),
+                DashboardFlowDto(
+                    flowId = "CREDIT_CHECK_FLOW",
+                    title = "Credit Check",
+                    description = "Run credit bureau check and analysis",
+                    icon = "CREDIT_CHECK",
+                    ui = DashboardUiMetaDto(
+                        backgroundColor = "#2C5F2D",
+                        textColor = "#FFFFFF",
+                        iconColor = "#90EE90"
+                    ),
+                    startable = true,
+                    productCode = "PL",
+                    partnerCode = null,
+                    branchCode = null
+                ),
+                DashboardFlowDto(
+                    flowId = "PAYMENT_FLOW",
+                    title = "Payment Collection",
+                    description = "Collect processing fees and EMI setup",
+                    icon = "PAYMENT_COLLECTION",
+                    ui = DashboardUiMetaDto(
+                        backgroundColor = "#8B0000",
+                        textColor = "#FFFFFF",
+                        iconColor = "#FFB6C1"
+                    ),
+                    startable = true,
+                    productCode = "PL",
+                    partnerCode = null,
+                    branchCode = null
+                )
+            )
+        )
+    }
+    
+    /**
+     * Runtime API - Single endpoint for all navigation
+     * POST /runtime/next-screen
+     * 
+     * Handles:
+     * 1. First load (currentScreenId = null or "__START__")
+     * 2. Next screen (currentScreenId + formData)
+     */
+    override suspend fun nextScreen(request: NextScreenRequestDto): NextScreenResponseDto {
+        delay(500) // Simulate network delay
+        
+        val nextScreenId = if (request.currentScreenId == null || request.currentScreenId == "__START__") {
+            // First load or flow start - return initial screen
+            "APPLICANT_IDENTITY"
+        } else {
+            // Navigate to next screen based on current screen
+            // In real implementation, backend Flow Engine would evaluate conditions and formData
+            when (request.currentScreenId) {
+                "APPLICANT_IDENTITY", "applicant_identity_details" -> "APPLICANT_BUSINESS_DETAILS"
+                "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY" // Loop for testing
+                else -> "APPLICANT_IDENTITY" // Default fallback
+            }
+        }
+        
+        val screenConfig = getFormConfiguration(nextScreenId)
+        
+        return NextScreenResponseDto(
+            nextScreenId = screenConfig.screenId,
+            screenConfig = screenConfig
+        )
+    }
+    
+    // Legacy Flow Engine APIs - Kept for backward compatibility
+    @Deprecated("Use nextScreen() instead")
     override suspend fun startFlow(request: FlowStartRequestDto): FlowResponseDto {
         delay(500) // Simulate network delay
         
@@ -1383,47 +1492,44 @@ class FormApiServiceDummy @Inject constructor(
         val screenConfig = getFormConfiguration(initialScreenId)
         
         return FlowResponseDto(
-            flowId = "applicant_onboarding_flow", // Example flow ID
+            flowId = "applicant_onboarding_flow",
             currentScreenId = screenConfig.screenId,
             screenConfig = screenConfig
         )
     }
     
+    @Deprecated("Use nextScreen() instead")
     override suspend fun navigateNext(request: FlowNextRequestDto): FlowResponseDto {
         delay(500) // Simulate network delay
         
-        // Determine next screen based on form data and current screen
-        // In real implementation, backend Flow Engine would evaluate conditions
         val nextScreenId = when (request.currentScreenId) {
             "APPLICANT_IDENTITY", "applicant_identity_details" -> "APPLICANT_BUSINESS_DETAILS"
-            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY" // Loop for testing
-            else -> "APPLICANT_IDENTITY" // Default fallback
+            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY"
+            else -> "APPLICANT_IDENTITY"
         }
         
         val screenConfig = getFormConfiguration(nextScreenId)
         
         return FlowResponseDto(
-            flowId = "applicant_onboarding_flow", // Example flow ID
+            flowId = "applicant_onboarding_flow",
             currentScreenId = screenConfig.screenId,
             screenConfig = screenConfig
         )
     }
     
+    @Deprecated("Use nextScreen() instead")
     override suspend fun navigateBack(request: FlowBackRequestDto): FlowResponseDto {
         delay(500) // Simulate network delay
         
-        // Simple back navigation logic for dummy implementation
-        // In real implementation, backend Flow Engine would determine the previous screen
         val previousScreenId = when (request.currentScreenId) {
             "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY"
-            else -> "APPLICANT_IDENTITY" // Default fallback
+            else -> "APPLICANT_IDENTITY"
         }
         
-        // Get the previous screen configuration
         val previousScreenConfig = getFormConfiguration(previousScreenId)
         
         return FlowResponseDto(
-            flowId = "applicant_onboarding_flow", // Example flow ID
+            flowId = "applicant_onboarding_flow",
             currentScreenId = previousScreenConfig.screenId,
             screenConfig = previousScreenConfig
         )

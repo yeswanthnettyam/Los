@@ -141,10 +141,17 @@ fun DynamicFormScreen(
     // Handle system back button - respect allowBackNavigation flag
     BackHandler(enabled = allowBackNavigation) {
         if (allowBackNavigation) {
-            viewModel.handleBackNavigation(
+        viewModel.handleBackNavigation(
                 applicationId = applicationId,
-                onNavigateToScreen = { screenId ->
-                    onNavigateToNext(screenId)
+            onNavigateToScreen = { screenId ->
+                onNavigateToNext(screenId)
+            },
+                onExitFlow = {
+                    // Exit flow - navigate to home or previous activity
+                    // For now, just show a message (UI should handle actual navigation)
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("Exiting flow")
+                    }
                 },
                 onError = { error ->
                     coroutineScope.launch {
@@ -174,12 +181,18 @@ fun DynamicFormScreen(
                     ) {
                         // Show back button only if allowBackNavigation is true
                         if (allowBackNavigation) {
-                            IconButton(
-                                onClick = {
+                        IconButton(
+                            onClick = {
                                     viewModel.handleBackNavigation(
                                         applicationId = applicationId,
                                         onNavigateToScreen = { screenId ->
                                             onNavigateToNext(screenId)
+                                        },
+                                        onExitFlow = {
+                                            // Exit flow - navigate to home or previous activity
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Exiting flow")
+                                            }
                                         },
                                         onError = { error ->
                                             coroutineScope.launch {
@@ -187,14 +200,14 @@ fun DynamicFormScreen(
                                             }
                                         }
                                     )
-                                },
-                                modifier = Modifier.align(Alignment.CenterStart)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onPrimary
-                                )
+                            },
+                            modifier = Modifier.align(Alignment.CenterStart)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
                             }
                         }
                         Text(
