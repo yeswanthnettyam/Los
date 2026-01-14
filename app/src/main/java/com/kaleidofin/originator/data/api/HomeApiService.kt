@@ -4,7 +4,7 @@ import com.kaleidofin.originator.data.dto.HomeScreenDto
 import retrofit2.http.GET
 
 interface HomeApiService {
-    @GET("home/dashboard")
+    @GET("api/v1/home/dashboard")
     suspend fun getHomeDashboard(): HomeScreenDto
 }
 

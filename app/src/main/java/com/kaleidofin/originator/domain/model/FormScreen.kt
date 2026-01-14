@@ -111,7 +111,7 @@ sealed class DependencyCondition {
      * Simple condition: field operator value
      */
     data class Condition(
-        val field: String,
+    val field: String,
         val operator: String, // "EQUALS", "NOT_EQUALS", "IN", "NOT_IN", "EXISTS", "NOT_EXISTS", "GREATER_THAN", "LESS_THAN"
         val value: Any? // Can be null for EXISTS/NOT_EXISTS
     ) : DependencyCondition()

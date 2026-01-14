@@ -64,7 +64,7 @@ import kotlinx.coroutines.launch
  * - Icon from IconRegistry mapping
  * - Dynamic title/description
  * 
- * On click: Calls Runtime API with currentScreenId = "__START__"
+ * On click: Calls Runtime API with currentScreenId = null
  */
 @Composable
 fun HomeScreen(
@@ -76,8 +76,6 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     
-    // TODO: Get applicationId from proper source (e.g., SharedPreferences, Auth state)
-    val applicationId = remember { "placeholder-application-id" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -152,10 +150,9 @@ fun HomeScreen(
                         DashboardFlowCard(
                             flow = flow,
                             onClick = {
-                                // Start flow using Runtime API with "__START__" marker
+                                // Start flow using Runtime API with currentScreenId = null
                                 viewModel.onFlowClick(
                                     flow = flow,
-                                    applicationId = applicationId,
                                     onSuccess = { screenId ->
                                         // Navigate to dynamic form with resolved screenId
                                         onNavigateToDynamicForm(screenId)

@@ -17,7 +17,12 @@ data class DynamicFormUiState(
     val error: String? = null,
     val openModalId: String? = null,
     val nextScreen: String? = null,
-    val firstErrorFieldId: String? = null // Field ID to scroll to on validation error
+    val firstErrorFieldId: String? = null, // Field ID to scroll to on validation error
+    // Flow context - stored when flow starts, used for all subsequent API calls
+    val flowId: String? = null,
+    val productCode: String? = null,
+    val partnerCode: String? = null,
+    val branchCode: String? = null
 ) {
     /**
      * Helper function to wrap a value in { "value": ... } object
@@ -258,7 +263,7 @@ data class DynamicFormUiState(
                             }
                         } else {
                             // For single-select: check if actual value is in expected list
-                            expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        expectedValues.any { it.equals(actualValue, ignoreCase = true) }
                         }
                     }
                     expectedValue is String -> {
@@ -271,7 +276,7 @@ data class DynamicFormUiState(
                             }
                         } else {
                             // For single-select: check if actual value is in expected list
-                            expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        expectedValues.any { it.equals(actualValue, ignoreCase = true) }
                         }
                     }
                     else -> false
@@ -292,7 +297,7 @@ data class DynamicFormUiState(
                             }
                         } else {
                             // For single-select: check if actual value is NOT in expected list
-                            !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
                         }
                     }
                     expectedValue is String -> {
@@ -305,7 +310,7 @@ data class DynamicFormUiState(
                             }
                         } else {
                             // For single-select: check if actual value is NOT in expected list
-                            !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
+                        !expectedValues.any { it.equals(actualValue, ignoreCase = true) }
                         }
                     }
                     else -> true

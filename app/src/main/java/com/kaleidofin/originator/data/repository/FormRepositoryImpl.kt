@@ -9,10 +9,6 @@ import javax.inject.Inject
 class FormRepositoryImpl @Inject constructor(
     private val formDataSource: FormDataSource
 ) : FormRepository {
-    override suspend fun getFormConfiguration(target: String): FormScreen {
-        return formDataSource.getFormConfiguration(target).toDomain()
-    }
-    
     override suspend fun getMasterData(dataSource: String): List<String> {
         val result = formDataSource.getMasterData(dataSource)
         val commaSeparatedString = result[dataSource] ?: ""

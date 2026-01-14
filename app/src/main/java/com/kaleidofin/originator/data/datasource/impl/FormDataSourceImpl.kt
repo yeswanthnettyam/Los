@@ -19,24 +19,40 @@ class FormDataSourceImpl @Inject constructor(
     
     /**
      * Runtime API - Single method for all navigation
-     * Calls POST /runtime/next-screen
+     * Calls POST /api/v1/runtime/next-screen
      */
     override suspend fun nextScreen(
-        applicationId: String,
+        applicationId: String?,
         currentScreenId: String?,
+        flowId: String?,
+        productCode: String?,
+        partnerCode: String?,
+        branchCode: String?,
         formData: Map<String, Any>?
     ): NextScreenResponseDto {
         return formApiService.nextScreen(
             NextScreenRequestDto(
                 applicationId = applicationId,
                 currentScreenId = currentScreenId,
+                flowId = flowId,
+                productCode = productCode,
+                partnerCode = partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA", // Default to SAMASTA for testing
+                branchCode = branchCode,
                 formData = formData
             )
         )
     }
     
     override suspend fun getMasterData(dataSource: String): Map<String, String> {
-        return formApiService.getMasterData(dataSource)
+        // Use getAllMasterData() from swagger API and filter by dataSource on client side
+        val allMasterData = formApiService.getAllMasterData()
+        val dataList = allMasterData[dataSource] ?: emptyList()
+        // Convert list to comma-separated string format (for backward compatibility)
+        return mapOf(dataSource to dataList.joinToString(","))
+    }
+    
+    override suspend fun getAllMasterData(): Map<String, List<String>> {
+        return formApiService.getAllMasterData()
     }
     
     override fun updateFormData(screenId: String, formData: Map<String, Any>) {
@@ -46,41 +62,7 @@ class FormDataSourceImpl @Inject constructor(
         }
     }
     
-    // Legacy APIs - Deprecated: Use Runtime API instead
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun startFlow(applicationId: String, flowType: String?): FlowResponseDto {
-        return formApiService.startFlow(
-            FlowStartRequestDto(
-                applicationId = applicationId,
-                flowType = flowType
-            )
-        )
-    }
-    
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun navigateNext(applicationId: String, currentScreenId: String, formData: Map<String, Any>): FlowResponseDto {
-        return formApiService.navigateNext(
-            FlowNextRequestDto(
-                applicationId = applicationId,
-                currentScreenId = currentScreenId,
-                formData = formData
-            )
-        )
-    }
-    
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun navigateBack(applicationId: String, currentScreenId: String): FlowResponseDto {
-        return formApiService.navigateBack(
-            FlowBackRequestDto(
-                applicationId = applicationId,
-                currentScreenId = currentScreenId
-            )
-        )
-    }
-    
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun getFormConfiguration(target: String): FormScreenDto {
-        return formApiService.getFormConfiguration(target)
-    }
+    // Legacy APIs removed - Only swagger APIs are used now
+    // All navigation must use nextScreen() which calls POST /api/v1/runtime/next-screen
 }
 

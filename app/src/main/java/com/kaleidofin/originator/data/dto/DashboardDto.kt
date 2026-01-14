@@ -21,6 +21,7 @@ data class DashboardFlowDto(
     @SerializedName("icon") val icon: String? = null, // Icon key (e.g., "APPLICANT_ONBOARDING")
     @SerializedName("ui") val ui: DashboardUiMetaDto? = null,
     @SerializedName("startable") val startable: Boolean = true,
+    @SerializedName("status") val status: String? = null, // Flow status (e.g., "ACTIVE", "INACTIVE")
     
     // Context for starting flow
     @SerializedName("productCode") val productCode: String? = null,

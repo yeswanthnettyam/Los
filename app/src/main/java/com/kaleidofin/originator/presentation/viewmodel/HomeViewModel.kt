@@ -20,7 +20,7 @@ import javax.inject.Inject
  * Dashboard is fully dynamic:
  * - Fetches flows from GET /api/v1/dashboard/flows
  * - Each flow includes UI metadata (colors, icons)
- * - On click: calls Runtime API with currentScreenId = "__START__"
+ * - On click: calls Runtime API with currentScreenId = null
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -72,8 +72,8 @@ class HomeViewModel @Inject constructor(
     /**
      * Start flow from dashboard card click
      * 
-     * Calls Runtime API: POST /runtime/next-screen
-     * with currentScreenId = "__START__" (special marker for flow initiation)
+     * Calls Runtime API: POST /api/v1/runtime/next-screen
+     * with currentScreenId = null (for flow initiation)
      * 
      * Backend responsibilities:
      * - Evaluate flow conditions
@@ -82,7 +82,6 @@ class HomeViewModel @Inject constructor(
      */
     fun onFlowClick(
         flow: DashboardFlow,
-        applicationId: String,
         onSuccess: (screenId: String) -> Unit,
         onError: (String) -> Unit
     ) {
@@ -90,13 +89,17 @@ class HomeViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null) }
             
             try {
-                // Call Runtime API - POST /runtime/next-screen
-                // currentScreenId = "__START__" to initiate flow
+                // Call Runtime API - POST /api/v1/runtime/next-screen
+                // currentScreenId = null to initiate flow
                 // Backend resolves flow and returns first screen + config
                 val response = formDataSource.nextScreen(
-                    applicationId = applicationId,
-                    currentScreenId = "__START__", // Special marker for flow start
-                    formData = null
+                    applicationId = null, // Not sent
+                    currentScreenId = null, // null for first load
+                    flowId = flow.flowId,
+                    productCode = flow.productCode,
+                    partnerCode = flow.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA", // Default to SAMASTA for testing
+                    branchCode = flow.branchCode,
+                    formData = emptyMap() // Empty object {} for first load
                 )
                 
                 _uiState.update { it.copy(isLoading = false) }

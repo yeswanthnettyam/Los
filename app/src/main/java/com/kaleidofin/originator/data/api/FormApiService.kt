@@ -9,7 +9,7 @@ import retrofit2.http.Path
 interface FormApiService {
     /**
      * Runtime API - Single endpoint for all navigation
-     * POST /runtime/next-screen
+     * POST /api/v1/runtime/next-screen
      * 
      * Usage:
      * 1. First load: currentScreenId = null, formData = null
@@ -31,28 +31,15 @@ interface FormApiService {
     @GET("api/v1/dashboard/flows")
     suspend fun getDashboardFlows(): DashboardResponseDto
     
-    @POST("runtime/next-screen")
+    @POST("api/v1/runtime/next-screen")
     suspend fun nextScreen(@Body request: NextScreenRequestDto): NextScreenResponseDto
     
-    @GET("master-data/{dataSource}")
-    suspend fun getMasterData(@Path("dataSource") dataSource: String): Map<String, String>
-    
-    // Legacy APIs - Deprecated: Use Runtime API instead
-    // Keep for backward compatibility with existing dummy implementations
-    
-    @Deprecated("Use Runtime API (POST /runtime/next-screen) instead")
-    @POST("flow/start")
-    suspend fun startFlow(@Body request: FlowStartRequestDto): FlowResponseDto
-    
-    @Deprecated("Use Runtime API (POST /runtime/next-screen) instead")
-    @POST("flow/next")
-    suspend fun navigateNext(@Body request: FlowNextRequestDto): FlowResponseDto
-    
-    @Deprecated("Use Runtime API (POST /runtime/next-screen) instead")
-    @POST("flow/back")
-    suspend fun navigateBack(@Body request: FlowBackRequestDto): FlowResponseDto
-    
-    @Deprecated("Use Runtime API instead")
-    @GET("form/{target}")
-    suspend fun getFormConfiguration(@Path("target") target: String): FormScreenDto
+    /**
+     * Master Data API - Get all master data
+     * GET /api/v1/master-data
+     * 
+     * Returns all master data entries
+     */
+    @GET("api/v1/master-data")
+    suspend fun getAllMasterData(): Map<String, List<String>>
 }

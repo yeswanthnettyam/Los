@@ -400,7 +400,7 @@ sealed class DependencyConditionDto {
      * Simple condition: field operator value
      */
     data class ConditionDto(
-        @SerializedName("field") val field: String,
+    @SerializedName("field") val field: String,
         @SerializedName("operator") val operator: String, // "EQUALS", "NOT_EQUALS", "IN", "NOT_IN", "EXISTS", "NOT_EXISTS", "GREATER_THAN", "LESS_THAN"
         @SerializedName("value") val value: Any? // Can be null for EXISTS/NOT_EXISTS
     ) : DependencyConditionDto()
@@ -567,15 +567,19 @@ data class FormValidationRuleDto(
 )
 
 // Runtime API DTOs - Single API for all navigation
-// POST /runtime/next-screen handles:
+// POST /api/v1/runtime/next-screen handles:
 // 1. First load (currentScreenId = null)
 // 2. Next navigation (currentScreenId + formData)
 // 3. Backend manages flow snapshot and config resolution
 
 data class NextScreenRequestDto(
-    @SerializedName("applicationId") val applicationId: String,
+    @SerializedName("applicationId") val applicationId: String? = null, // null - not sent
     @SerializedName("currentScreenId") val currentScreenId: String? = null, // null for first load
-    @SerializedName("formData") val formData: Map<String, Any>? = null // null for first load
+    @SerializedName("flowId") val flowId: String? = null,
+    @SerializedName("productCode") val productCode: String? = null,
+    @SerializedName("partnerCode") val partnerCode: String? = null,
+    @SerializedName("branchCode") val branchCode: String? = null,
+    @SerializedName("formData") val formData: Map<String, Any>? = null // empty object {} for first load
 )
 
 data class NextScreenResponseDto(
@@ -586,27 +590,27 @@ data class NextScreenResponseDto(
 // Legacy Flow Engine API DTOs - Deprecated: Use Runtime API instead
 // Keep for backward compatibility with existing dummy implementations
 
-@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
+@Deprecated("Use Runtime API (POST /api/v1/runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowResponseDto(
     @SerializedName("flowId") val flowId: String,
     @SerializedName("currentScreenId") val currentScreenId: String,
     @SerializedName("screenConfig") val screenConfig: FormScreenDto
 )
 
-@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
+@Deprecated("Use Runtime API (POST /api/v1/runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowStartRequestDto(
     @SerializedName("applicationId") val applicationId: String,
     @SerializedName("flowType") val flowType: String? = null
 )
 
-@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
+@Deprecated("Use Runtime API (POST /api/v1/runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowNextRequestDto(
     @SerializedName("applicationId") val applicationId: String,
     @SerializedName("currentScreenId") val currentScreenId: String,
     @SerializedName("formData") val formData: Map<String, Any>
 )
 
-@Deprecated("Use Runtime API (POST /runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
+@Deprecated("Use Runtime API (POST /api/v1/runtime/next-screen) instead", ReplaceWith("NextScreenRequestDto"))
 data class FlowBackRequestDto(
     @SerializedName("applicationId") val applicationId: String,
     @SerializedName("currentScreenId") val currentScreenId: String

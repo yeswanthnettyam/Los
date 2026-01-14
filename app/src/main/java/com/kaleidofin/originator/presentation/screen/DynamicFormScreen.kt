@@ -108,11 +108,18 @@ fun DynamicFormScreen(
     }
 
     LaunchedEffect(target) {
-        // Check if this is initial load (no current screen in state)
+        // Always use Runtime API to get screen configuration
+        // This ensures we use POST /api/v1/runtime/next-screen instead of deprecated GET /api/v1/form/{target}
         val isInitialLoad = uiState.formScreen == null
-        // Check if we have pending restore data (from back navigation)
         val restoreData = viewModel.getPendingRestoreData()
-        viewModel.loadFormConfiguration(target, isInitialLoad, restoreData)
+        
+        // Use Runtime API to load screen configuration
+        // For initial load: currentScreenId = null
+        // For subsequent loads: currentScreenId = target (screenId from previous response)
+        viewModel.loadScreenViaRuntimeApi(
+            currentScreenId = if (isInitialLoad) null else target,
+            restoreData = restoreData
+        )
     }
 
     LaunchedEffect(uiState.nextScreen) {
@@ -134,15 +141,11 @@ fun DynamicFormScreen(
     val formScreen = uiState.formScreen
     val allowBackNavigation = formScreen?.layout?.allowBackNavigation ?: true // Default to true for backward compatibility
     
-    // TODO: Get applicationId from a proper source (e.g., SharedPreferences, passed parameter, or screen config)
-    // For now, using a placeholder - this should be replaced with actual applicationId retrieval
-    val applicationId = remember { "placeholder-application-id" } // Replace with actual applicationId
-    
     // Handle system back button - respect allowBackNavigation flag
     BackHandler(enabled = allowBackNavigation) {
         if (allowBackNavigation) {
         viewModel.handleBackNavigation(
-                applicationId = applicationId,
+                applicationId = null, // Not sent to backend
             onNavigateToScreen = { screenId ->
                 onNavigateToNext(screenId)
             },
@@ -184,7 +187,7 @@ fun DynamicFormScreen(
                         IconButton(
                             onClick = {
                                     viewModel.handleBackNavigation(
-                                        applicationId = applicationId,
+                                        applicationId = null, // Not sent to backend
                                         onNavigateToScreen = { screenId ->
                                             onNavigateToNext(screenId)
                                         },

@@ -3,7 +3,6 @@ package com.kaleidofin.originator.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaleidofin.originator.domain.model.FormField
-import com.kaleidofin.originator.domain.usecase.GetFormConfigurationUseCase
 import com.kaleidofin.originator.domain.usecase.GetMasterDataUseCase
 import com.kaleidofin.originator.presentation.ui.state.DynamicFormUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,11 +30,10 @@ data class NavigationStackEntry(
 
 @HiltViewModel
 class DynamicFormViewModel @Inject constructor(
-    private val getFormConfigurationUseCase: GetFormConfigurationUseCase,
     private val getMasterDataUseCase: GetMasterDataUseCase,
     private val formDataSource: FormDataSource
 ) : ViewModel() {
-    
+
     // Local navigation stack for back navigation
     // Backend manages flow snapshot; Android uses this for local back button handling
     private val _navigationStack = mutableListOf<NavigationStackEntry>()
@@ -47,209 +45,15 @@ class DynamicFormViewModel @Inject constructor(
         val formScreen = screenConfigDto.toDomain()
         
         // Process screen config (same logic as loadFormConfiguration but without API call)
-        val initialData = mutableMapOf<String, Any>()
-        formScreen.hiddenFields.forEach { field ->
-            val defaultValue = field.defaultValue ?: when (field.type) {
-                "BOOLEAN" -> false
-                "TEXT" -> ""
-                "NUMBER" -> 0
-                else -> ""
-            }
-            initialData[field.id] = mapOf("value" to defaultValue)
-        }
-
-        // Initialize repeatable section instances (including subsections)
-        val sectionInstances = mutableMapOf<String, Int>()
-        fun processSection(section: com.kaleidofin.originator.domain.model.FormSection) {
-            if (section.repeatable) {
-                sectionInstances[section.sectionId] = section.minInstances
-            }
-            section.subSections.forEach { processSection(it) }
-        }
-        formScreen.sections.forEach { processSection(it) }
-
-        // Collect all dataSource requirements and initialize field values from JSON (including subsections)
-        val masterDataKeys = mutableSetOf<String>()
-        val inlineDataMap = mutableMapOf<String, List<String>>()
-        
-        fun collectFields(section: com.kaleidofin.originator.domain.model.FormSection, sectionIndex: Int? = null) {
-            section.fields.forEach { field ->
-                // Initialize field value from JSON if present - wrap in { "value": ... }
-                val fieldKey = if (sectionIndex != null) "${field.id}_$sectionIndex" else field.id
-                if (field.value != null) {
-                    initialData[fieldKey] = mapOf("value" to field.value)
-                }
-                
-                field.dataSource?.let { dataSource ->
-                    when (dataSource.type) {
-                        "INLINE" -> {
-                            // Store INLINE values
-                            if (dataSource.values != null) {
-                                inlineDataMap[field.id] = dataSource.values
-                            }
-                        }
-                        "MASTER" -> {
-                            // Collect MASTER keys to load
-                            if (dataSource.key != null) {
-                                masterDataKeys.add(dataSource.key)
-                            }
-                        }
-                        "API" -> {
-                            // API dataSource will be loaded on demand when field is accessed
-                        }
-                    }
-                }
-            }
-            // Process subsections recursively
-            section.subSections.forEach { subSection ->
-                val subInstanceCount = if (subSection.repeatable) {
-                    sectionInstances[subSection.sectionId] ?: subSection.minInstances
-                } else {
-                    1
-                }
-                repeat(subInstanceCount) { subIndex ->
-                    collectFields(subSection, if (subSection.repeatable) subIndex else null)
-                }
-            }
-        }
-        
-        // Process all sections and their instances
-        formScreen.sections.forEach { section ->
-            val instanceCount = if (section.repeatable) {
-                sectionInstances[section.sectionId] ?: section.minInstances
-            } else {
-                1
-            }
-            repeat(instanceCount) { index ->
-                collectFields(section, if (section.repeatable) index else null)
-            }
-        }
-
-        // Load master data for all MASTER dataSources
-        val masterDataMap = mutableMapOf<String, List<String>>()
-        masterDataKeys.forEach { key ->
-            try {
-                val options = getMasterDataUseCase(key)
-                masterDataMap[key] = options
-            } catch (e: Exception) {
-                // If master data fails to load, use empty list
-                masterDataMap[key] = emptyList()
-            }
-        }
-
-        // If restoreData is provided, merge it with initial data
-        // Wrap restoreData values if they're not already wrapped
-        val finalFormData = if (restoreData != null) {
-            val mergedData = initialData.toMutableMap()
-            restoreData.forEach { (key, value) ->
-                // Check if value is already wrapped, if not wrap it
-                val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
-                    value // Already wrapped
-                } else {
-                    mapOf("value" to value) // Wrap it
-                }
-                mergedData[key] = wrappedValue
-            }
-            mergedData
-        } else {
-            initialData
-        }
-        
-        _uiState.update {
-            it.copy(
-                formScreen = formScreen,
-                formData = finalFormData,
-                sectionInstances = sectionInstances,
-                masterData = masterDataMap,
-                inlineData = inlineDataMap,
-                isLoading = false,
-                fieldErrors = emptyMap() // Clear errors when loading/restoring
-            )
-        }
-    }
-
-    private val _uiState = MutableStateFlow(DynamicFormUiState())
-    val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
-
-    // Flow stack removed - navigation is now backend-driven
-
-    /* ---------------- LOAD ---------------- */
-
-    // Start flow using Flow Engine /flow/start API
-    // Returns flowId, currentScreenId, and full screenConfig in single response
-    /**
-     * Start flow using Runtime API (POST /runtime/next-screen with currentScreenId = null)
-     * Clears navigation stack and loads initial screen
-     */
-    fun startFlow(applicationId: String, flowType: String? = null) {
-        viewModelScope.launch {
-            _uiState.update { 
-                DynamicFormUiState(
-                    isLoading = true,
-                    error = null
-                )
-            }
-            
-            try {
-                // Clear navigation stack for new flow
-                _navigationStack.clear()
-                
-                // Call Runtime API - POST /runtime/next-screen with currentScreenId = null
-                // Backend evaluates flow, resolves config, manages snapshot
-                val response = formDataSource.nextScreen(
-                    applicationId = applicationId,
-                    currentScreenId = null, // null for first load
-                    formData = null
-                )
-                
-                // Push initial screen to navigation stack
-                _navigationStack.add(
-                    NavigationStackEntry(
-                        screenId = response.nextScreenId,
-                        screenConfig = response.screenConfig,
-                        formData = null
-                    )
-                )
-                
-                // Load screen config directly from response - NO separate API call
-                loadScreenFromDto(response.screenConfig, restoreData = null)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = e.message ?: "Failed to start flow"
-                    )
-                }
-            }
-        }
-    }
-    
-    // Legacy method - Deprecated: Use startFlow() instead for navigation
-    // Keep for backward compatibility or non-navigation use cases
-    @Deprecated("Use startFlow() instead for navigation. This method makes a separate config API call.")
-    fun loadFormConfiguration(target: String, isInitialLoad: Boolean = false, restoreData: Map<String, Any>? = null) {
-        viewModelScope.launch {
-            // Reset state when loading a new configuration
-            _uiState.update { 
-                DynamicFormUiState(
-                    isLoading = true,
-                    error = null
-                )
-            }
-
-            val formScreen = getFormConfigurationUseCase(target)
-            
-            // Flow stack removed - navigation is now backend-driven
-
             val initialData = mutableMapOf<String, Any>()
             formScreen.hiddenFields.forEach { field ->
-                val defaultValue = field.defaultValue ?: when (field.type) {
+            val defaultValue = field.defaultValue ?: when (field.type) {
                     "BOOLEAN" -> false
                     "TEXT" -> ""
                     "NUMBER" -> 0
                     else -> ""
                 }
-                initialData[field.id] = mapOf("value" to defaultValue)
+            initialData[field.id] = mapOf("value" to defaultValue)
             }
 
             // Initialize repeatable section instances (including subsections)
@@ -268,10 +72,10 @@ class DynamicFormViewModel @Inject constructor(
             
             fun collectFields(section: com.kaleidofin.originator.domain.model.FormSection, sectionIndex: Int? = null) {
                 section.fields.forEach { field ->
-                    // Initialize field value from JSON if present - wrap in { "value": ... }
+                // Initialize field value from JSON if present - wrap in { "value": ... }
                     val fieldKey = if (sectionIndex != null) "${field.id}_$sectionIndex" else field.id
                     if (field.value != null) {
-                        initialData[fieldKey] = mapOf("value" to field.value)
+                    initialData[fieldKey] = mapOf("value" to field.value)
                     }
                     
                     field.dataSource?.let { dataSource ->
@@ -290,7 +94,6 @@ class DynamicFormViewModel @Inject constructor(
                             }
                             "API" -> {
                                 // API dataSource will be loaded on demand when field is accessed
-                                // For now, we can preload if needed
                             }
                         }
                     }
@@ -333,18 +136,18 @@ class DynamicFormViewModel @Inject constructor(
             }
 
             // If restoreData is provided, merge it with initial data
-            // Wrap restoreData values if they're not already wrapped
+        // Wrap restoreData values if they're not already wrapped
             val finalFormData = if (restoreData != null) {
                 val mergedData = initialData.toMutableMap()
-                restoreData.forEach { (key, value) ->
-                    // Check if value is already wrapped, if not wrap it
-                    val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
-                        value // Already wrapped
-                    } else {
-                        mapOf("value" to value) // Wrap it
-                    }
-                    mergedData[key] = wrappedValue
+            restoreData.forEach { (key, value) ->
+                // Check if value is already wrapped, if not wrap it
+                val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
+                    value // Already wrapped
+                } else {
+                    mapOf("value" to value) // Wrap it
                 }
+                mergedData[key] = wrappedValue
+            }
                 mergedData
             } else {
                 initialData
@@ -360,9 +163,233 @@ class DynamicFormViewModel @Inject constructor(
                     isLoading = false,
                     fieldErrors = emptyMap() // Clear errors when loading/restoring
                 )
+        }
+    }
+
+    private val _uiState = MutableStateFlow(DynamicFormUiState())
+    val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
+
+    // Flow stack removed - navigation is now backend-driven
+
+    /* ---------------- LOAD ---------------- */
+
+    // Start flow using Flow Engine /flow/start API
+    // Returns flowId, currentScreenId, and full screenConfig in single response
+    /**
+     * Load screen using Runtime API (POST /api/v1/runtime/next-screen)
+     * This is the ONLY way to get screen configurations - always uses Runtime API
+     * 
+     * @param currentScreenId Screen ID to load. If null, loads initial screen (flow start)
+     * @param restoreData Optional form data to restore when loading screen
+     * @param flowId Flow ID (required for initial load, optional for subsequent)
+     * @param productCode Product code (optional)
+     * @param partnerCode Partner code (optional, defaults to SAMASTA)
+     * @param branchCode Branch code (optional)
+     */
+    fun loadScreenViaRuntimeApi(
+        currentScreenId: String? = null,
+        restoreData: Map<String, Any>? = null,
+        flowId: String? = null,
+        productCode: String? = null,
+        partnerCode: String? = null,
+        branchCode: String? = null
+    ) {
+        viewModelScope.launch {
+            // Preserve flow context when updating state
+            _uiState.update { 
+                it.copy(
+                    isLoading = true,
+                    error = null
+                )
+            }
+            
+            try {
+                // Get flow context from state (stored from initial load) or use provided parameters
+                val state = _uiState.value
+                val finalFlowId = flowId ?: state.flowId
+                val finalProductCode = productCode ?: state.productCode
+                val finalPartnerCode = partnerCode?.takeIf { it.isNotBlank() } ?: state.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
+                val finalBranchCode = branchCode ?: state.branchCode
+                
+                // Validate that required flow context is available (for initial load)
+                if (currentScreenId == null && (finalFlowId == null || finalProductCode == null)) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Flow context (flowId, productCode) is required to start flow"
+                        )
+                    }
+                    return@launch
+                }
+                
+                // If this is initial load, clear navigation stack and store flow context
+                if (currentScreenId == null) {
+                    _navigationStack.clear()
+                    // Store flow context in state for subsequent calls
+                    _uiState.update {
+                        it.copy(
+                            flowId = finalFlowId,
+                            productCode = finalProductCode,
+                            partnerCode = finalPartnerCode,
+                            branchCode = finalBranchCode
+                        )
+                    }
+                }
+                
+                // For subsequent loads, ensure we have flow context from state
+                val requestFlowId = finalFlowId ?: state.flowId
+                val requestProductCode = finalProductCode ?: state.productCode
+                
+                if (requestFlowId == null || requestProductCode == null) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Flow context missing. Please restart the flow."
+                        )
+                    }
+                    return@launch
+                }
+                
+                // Call Runtime API - POST /api/v1/runtime/next-screen
+                // Backend evaluates flow, resolves config, manages snapshot
+                val response = formDataSource.nextScreen(
+                    applicationId = null, // Not sent
+                    currentScreenId = currentScreenId, // null for initial load, screenId for subsequent
+                    flowId = requestFlowId,
+                    productCode = requestProductCode,
+                    partnerCode = finalPartnerCode,
+                    branchCode = finalBranchCode,
+                    formData = restoreData?.let { 
+                        // Unwrap values from { "value": ... } objects if needed
+                        it.mapValues { entry ->
+                            val value = entry.value
+                            if (value is Map<*, *> && value.containsKey("value")) {
+                                value["value"]!!
+                            } else {
+                                value
+                            }
+                        }
+                    }
+                )
+                
+                // Push screen to navigation stack (for back navigation)
+                _navigationStack.add(
+                    NavigationStackEntry(
+                        screenId = response.nextScreenId,
+                        screenConfig = response.screenConfig,
+                        formData = restoreData
+                    )
+                )
+                
+                // Extract and store flow context from screen config if available
+                val screenConfig = response.screenConfig
+                val currentStateForExtraction = _uiState.value
+                val extractedFlowId = screenConfig.flowId ?: finalFlowId ?: currentStateForExtraction.flowId
+                val extractedProductCode = screenConfig.scope?.productCode ?: finalProductCode ?: currentStateForExtraction.productCode
+                val extractedPartnerCode = screenConfig.scope?.partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: finalPartnerCode?.takeIf { it.isNotBlank() } 
+                    ?: currentStateForExtraction.partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: "SAMASTA"
+                val extractedBranchCode = screenConfig.scope?.branchCode ?: finalBranchCode ?: currentStateForExtraction.branchCode
+                
+                // Update state with flow context (from screen config, parameters, or existing state)
+                // Always preserve existing flow context if new values are not available
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        flowId = extractedFlowId ?: currentState.flowId,
+                        productCode = extractedProductCode ?: currentState.productCode,
+                        partnerCode = extractedPartnerCode,
+                        branchCode = extractedBranchCode ?: currentState.branchCode
+                    )
+                }
+                
+                // Load screen config directly from response - NO separate API call
+                loadScreenFromDto(screenConfig, restoreData = restoreData)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to load screen"
+                    )
+                }
             }
         }
     }
+    
+    /**
+     * Start flow using Runtime API (POST /api/v1/runtime/next-screen with currentScreenId = null)
+     * Clears navigation stack and loads initial screen
+     * 
+     * @deprecated Use loadScreenViaRuntimeApi() instead - this method is kept for backward compatibility
+     */
+    @Deprecated("Use loadScreenViaRuntimeApi() instead")
+    fun startFlow(applicationId: String, flowType: String? = null) {
+        viewModelScope.launch {
+            // Preserve flow context when updating state
+            _uiState.update { 
+                it.copy(
+                    isLoading = true,
+                    error = null
+                )
+            }
+            
+            try {
+                // Clear navigation stack for new flow
+                _navigationStack.clear()
+                
+                // Call Runtime API - POST /api/v1/runtime/next-screen with currentScreenId = null
+                // Backend evaluates flow, resolves config, manages snapshot
+                val response = formDataSource.nextScreen(
+                    applicationId = null, // Not sent
+                    currentScreenId = null, // null for first load
+                    flowId = flowType, // Use flowType parameter if provided
+                    productCode = null, // Will be extracted from screen config response
+                    partnerCode = "SAMASTA", // Default to SAMASTA for testing
+                    branchCode = null,
+                    formData = emptyMap() // Empty object {} for first load
+                )
+                
+                // Extract and store flow context from screen config response
+                val screenConfig = response.screenConfig
+                val extractedFlowId = screenConfig.flowId ?: flowType
+                val extractedProductCode = screenConfig.scope?.productCode
+                val extractedPartnerCode = screenConfig.scope?.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
+                val extractedBranchCode = screenConfig.scope?.branchCode
+                
+                // Update state with flow context
+                _uiState.update {
+                    it.copy(
+                        flowId = extractedFlowId,
+                        productCode = extractedProductCode,
+                        partnerCode = extractedPartnerCode,
+                        branchCode = extractedBranchCode
+                    )
+                }
+                
+                // Push initial screen to navigation stack
+                _navigationStack.add(
+                    NavigationStackEntry(
+                        screenId = response.nextScreenId,
+                        screenConfig = response.screenConfig,
+                        formData = null
+                    )
+                )
+                
+                // Load screen config directly from response - NO separate API call
+                loadScreenFromDto(response.screenConfig, restoreData = null)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to start flow"
+                    )
+                }
+            }
+        }
+    }
+    
+    // Legacy method removed - Always use loadScreenViaRuntimeApi() instead
+    // This ensures we only use Runtime API (POST /api/v1/runtime/next-screen)
 
     /* ---------------- FIELD UPDATE ---------------- */
 
@@ -907,7 +934,7 @@ class DynamicFormViewModel @Inject constructor(
             return
         }
 
-        // ✅ success flow - call Runtime API (POST /runtime/next-screen)
+        // ✅ success flow - call Runtime API (POST /api/v1/runtime/next-screen)
         // Backend evaluates flow conditions and returns next screen with full screenConfig
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, error = null) }
@@ -926,36 +953,70 @@ class DynamicFormViewModel @Inject constructor(
                 // Update dummy JSON with form data for testing (if needed)
                 formDataSource.updateFormData(screen.screenId, unwrappedFormData)
                 
-                // TODO: Get applicationId from proper source (currently using placeholder)
-                val applicationId = "placeholder-application-id" // Replace with actual applicationId
+                // Get flow context from state (stored from initial load)
+                val currentState = _uiState.value
+                val flowId = currentState.flowId
+                val productCode = currentState.productCode
+                val partnerCode = currentState.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
+                val branchCode = currentState.branchCode
                 
-                // Call Runtime API - POST /runtime/next-screen
+                // Validate that required flow context is available
+                if (flowId == null || productCode == null) {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            error = "Flow context missing. Please restart the flow."
+                        )
+                    }
+                    return@launch
+                }
+                
+                // Call Runtime API - POST /api/v1/runtime/next-screen
                 // Backend evaluates flow, resolves config, manages snapshot
                 val response = formDataSource.nextScreen(
-                    applicationId = applicationId,
+                    applicationId = null, // Not sent
                     currentScreenId = screen.screenId,
+                    flowId = flowId,
+                    productCode = productCode,
+                    partnerCode = partnerCode,
+                    branchCode = branchCode,
                     formData = unwrappedFormData
                 )
+                
+                // Extract and store flow context from screen config response (if available)
+                val screenConfig = response.screenConfig
+                val extractedFlowId = screenConfig.flowId ?: flowId ?: state.flowId
+                val extractedProductCode = screenConfig.scope?.productCode ?: productCode ?: state.productCode
+                val extractedPartnerCode = screenConfig.scope?.partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: state.partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: "SAMASTA"
+                val extractedBranchCode = screenConfig.scope?.branchCode ?: branchCode ?: state.branchCode
                 
                 // Push next screen to navigation stack (for local back navigation)
                 _navigationStack.add(
                     NavigationStackEntry(
                         screenId = response.nextScreenId,
-                        screenConfig = response.screenConfig,
+                        screenConfig = screenConfig,
                         formData = state.formData // Store wrapped form data for potential restoration
                     )
                 )
                 
-                // Load next screen config directly from response - NO separate API call
-                loadScreenFromDto(response.screenConfig, restoreData = null)
-                
-                // Navigate to next screen
-                _uiState.update {
-                    it.copy(
+                // Update state with flow context (from screen config, parameters, or current state)
+                // Always preserve existing flow context if new values are not available
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        flowId = extractedFlowId ?: currentState.flowId,
+                        productCode = extractedProductCode ?: currentState.productCode,
+                        partnerCode = extractedPartnerCode,
+                        branchCode = extractedBranchCode ?: currentState.branchCode,
                         isSubmitting = false,
                         nextScreen = response.nextScreenId
                     )
                 }
+                
+                // Load next screen config directly from response - NO separate API call
+                loadScreenFromDto(screenConfig, restoreData = null)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -1097,7 +1158,7 @@ class DynamicFormViewModel @Inject constructor(
      * 3. Backend snapshot allows editing previous screens
      */
     fun handleBackNavigation(
-        applicationId: String,
+        applicationId: String? = null, // Not used - kept for backward compatibility
         onNavigateToScreen: (String) -> Unit,
         onExitFlow: () -> Unit,
         onError: (String) -> Unit

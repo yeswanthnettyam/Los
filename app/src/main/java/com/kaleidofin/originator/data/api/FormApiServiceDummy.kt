@@ -1263,7 +1263,8 @@ class FormApiServiceDummy @Inject constructor(
 """
     }
     
-    override suspend fun getFormConfiguration(target: String): FormScreenDto {
+    // Private helper method for dummy implementation - not part of API interface
+    private suspend fun getFormConfiguration(target: String): FormScreenDto {
         delay(500) // Simulate network delay
         
         var jsonString = when (target) {
@@ -1358,20 +1359,28 @@ class FormApiServiceDummy @Inject constructor(
         return gson.toJson(jsonElement)
     }
 
-    override suspend fun getMasterData(dataSource: String): Map<String, String> {
+    // getMasterData removed - use getAllMasterData() instead (swagger API)
+    
+    /**
+     * Master Data API - Get all master data
+     * GET /api/v1/master-data
+     * 
+     * Returns all master data entries as a map of key -> list of values
+     */
+    override suspend fun getAllMasterData(): Map<String, List<String>> {
         delay(200) // Simulate network delay
 
         val masterDataMap = mapOf(
-            "GENDER" to "Male,Female,Other",
-            "EDUCATION_QUALIFICATION" to "Below 10th,10th,12th,Graduate,Post Graduate,Professional",
-            "MARITAL_STATUS" to "Single,Married,Divorced,Widowed",
-            "RELIGION" to "Hindu,Muslim,Christian,Sikh,Buddhist,Jain,Other",
-            "CASTE" to "General,OBC,SC,ST,Other",
-            "RESIDENCE_TYPE" to "Owned,Rented,Parental,Other",
-            "STATE" to "Andhra Pradesh,Arunachal Pradesh,Assam,Bihar,Chhattisgarh,Goa,Gujarat,Haryana,Himachal Pradesh,Jharkhand,Karnataka,Kerala,Madhya Pradesh,Maharashtra,Manipur,Meghalaya,Mizoram,Nagaland,Odisha,Punjab,Rajasthan,Sikkim,Tamil Nadu,Telangana,Tripura,Uttar Pradesh,Uttarakhand,West Bengal"
+            "GENDER" to listOf("Male", "Female", "Other"),
+            "EDUCATION_QUALIFICATION" to listOf("Below 10th", "10th", "12th", "Graduate", "Post Graduate", "Professional"),
+            "MARITAL_STATUS" to listOf("Single", "Married", "Divorced", "Widowed"),
+            "RELIGION" to listOf("Hindu", "Muslim", "Christian", "Sikh", "Buddhist", "Jain", "Other"),
+            "CASTE" to listOf("General", "OBC", "SC", "ST", "Other"),
+            "RESIDENCE_TYPE" to listOf("Owned", "Rented", "Parental", "Other"),
+            "STATE" to listOf("Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal")
         )
 
-        return mapOf(dataSource to (masterDataMap[dataSource] ?: ""))
+        return masterDataMap
     }
     
     // Flow Engine APIs - All return flowId, currentScreenId, and full screenConfig
@@ -1452,16 +1461,16 @@ class FormApiServiceDummy @Inject constructor(
     
     /**
      * Runtime API - Single endpoint for all navigation
-     * POST /runtime/next-screen
+     * POST /api/v1/runtime/next-screen
      * 
      * Handles:
-     * 1. First load (currentScreenId = null or "__START__")
+     * 1. First load (currentScreenId = null)
      * 2. Next screen (currentScreenId + formData)
      */
     override suspend fun nextScreen(request: NextScreenRequestDto): NextScreenResponseDto {
         delay(500) // Simulate network delay
         
-        val nextScreenId = if (request.currentScreenId == null || request.currentScreenId == "__START__") {
+        val nextScreenId = if (request.currentScreenId == null) {
             // First load or flow start - return initial screen
             "APPLICANT_IDENTITY"
         } else {
@@ -1482,56 +1491,6 @@ class FormApiServiceDummy @Inject constructor(
         )
     }
     
-    // Legacy Flow Engine APIs - Kept for backward compatibility
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun startFlow(request: FlowStartRequestDto): FlowResponseDto {
-        delay(500) // Simulate network delay
-        
-        // Determine initial screen based on flowType or use default
-        val initialScreenId = request.flowType ?: "APPLICANT_IDENTITY"
-        val screenConfig = getFormConfiguration(initialScreenId)
-        
-        return FlowResponseDto(
-            flowId = "applicant_onboarding_flow",
-            currentScreenId = screenConfig.screenId,
-            screenConfig = screenConfig
-        )
-    }
-    
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun navigateNext(request: FlowNextRequestDto): FlowResponseDto {
-        delay(500) // Simulate network delay
-        
-        val nextScreenId = when (request.currentScreenId) {
-            "APPLICANT_IDENTITY", "applicant_identity_details" -> "APPLICANT_BUSINESS_DETAILS"
-            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY"
-            else -> "APPLICANT_IDENTITY"
-        }
-        
-        val screenConfig = getFormConfiguration(nextScreenId)
-        
-        return FlowResponseDto(
-            flowId = "applicant_onboarding_flow",
-            currentScreenId = screenConfig.screenId,
-            screenConfig = screenConfig
-        )
-    }
-    
-    @Deprecated("Use nextScreen() instead")
-    override suspend fun navigateBack(request: FlowBackRequestDto): FlowResponseDto {
-        delay(500) // Simulate network delay
-        
-        val previousScreenId = when (request.currentScreenId) {
-            "APPLICANT_BUSINESS_DETAILS", "applicant_business_details" -> "APPLICANT_IDENTITY"
-            else -> "APPLICANT_IDENTITY"
-        }
-        
-        val previousScreenConfig = getFormConfiguration(previousScreenId)
-        
-        return FlowResponseDto(
-            flowId = "applicant_onboarding_flow",
-            currentScreenId = previousScreenConfig.screenId,
-            screenConfig = previousScreenConfig
-        )
-    }
+    // Legacy APIs removed - Only swagger APIs are used now
+    // All navigation must use nextScreen() which calls POST /api/v1/runtime/next-screen
 }
