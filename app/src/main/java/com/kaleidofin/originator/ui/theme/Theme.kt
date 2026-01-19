@@ -39,9 +39,14 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun OriginatorTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    // Force light theme to ensure consistent white background across all devices
+    // Set to false to use system theme detection
+    forceLightTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    // Use light theme by default to prevent blue background issues on some devices
+    val useDarkTheme = if (forceLightTheme) false else darkTheme
+    val colorScheme = if (useDarkTheme) DarkColorScheme else LightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

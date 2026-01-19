@@ -1,5 +1,6 @@
 [versions]
 # Build tools
+accompanistSwiperefresh = "0.34.0"
 agp = "8.13.1"
 kotlin = "2.0.21"
 
@@ -43,6 +44,7 @@ espressoCore = "3.7.0"
 
 [libraries]
 # Core
+accompanist-swiperefresh = { module = "com.google.accompanist:accompanist-swiperefresh", version.ref = "accompanistSwiperefresh" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
