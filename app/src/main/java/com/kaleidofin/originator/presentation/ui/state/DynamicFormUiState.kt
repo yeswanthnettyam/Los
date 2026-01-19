@@ -18,11 +18,20 @@ data class DynamicFormUiState(
     val openModalId: String? = null,
     val nextScreen: String? = null,
     val firstErrorFieldId: String? = null, // Field ID to scroll to on validation error
+    val isRestoringFromBack: Boolean = false, // Flag to prevent API call when restoring from back navigation
+    val isLoadingFromResponse: Boolean = false, // Flag to prevent API call when loading screen from form submission response
+    val isFlowCompleted: Boolean = false, // Flag to track if flow has completed - prevents restart after completion
+    // Runtime Session - Single source of truth for flow state
+    val runtimeSession: RuntimeSession? = null, // null = flow not started, non-null = flow in progress
     // Flow context - stored when flow starts, used for all subsequent API calls
-    val flowId: String? = null,
     val productCode: String? = null,
     val partnerCode: String? = null,
-    val branchCode: String? = null
+    val branchCode: String? = null,
+    // Legacy fields - kept for backward compatibility, but runtimeSession is primary
+    @Deprecated("Use runtimeSession.applicationId instead", ReplaceWith("runtimeSession?.applicationId"))
+    val applicationId: Int? = null,
+    @Deprecated("Use runtimeSession.flowId instead", ReplaceWith("runtimeSession?.flowId"))
+    val flowId: String? = null
 ) {
     /**
      * Helper function to wrap a value in { "value": ... } object

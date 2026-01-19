@@ -69,7 +69,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToDynamicForm: (String) -> Unit,
+    onNavigateToDynamicForm: (String, String?, String?, String?, String?) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState = viewModel.uiState.collectAsState().value
@@ -154,8 +154,16 @@ fun HomeScreen(
                                 viewModel.onFlowClick(
                                     flow = flow,
                                     onSuccess = { screenId ->
-                                        // Navigate to dynamic form with resolved screenId
-                                        onNavigateToDynamicForm(screenId)
+                                        // Navigate to DynamicFormScreen - single route for entire flow
+                                        // Screen transitions happen via ViewModel state, not navigation
+                                        // Note: target parameter is not used in route but kept for function signature compatibility
+                                        onNavigateToDynamicForm(
+                                            screenId, // target - not used in route
+                                            flow.flowId,
+                                            flow.productCode,
+                                            flow.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA",
+                                            flow.branchCode
+                                        )
                                     },
                                     onError = { error ->
                                         coroutineScope.launch {

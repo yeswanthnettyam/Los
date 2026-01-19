@@ -37,10 +37,17 @@ import com.kaleidofin.originator.presentation.viewmodel.DynamicFormViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+/**
+ * SINGLE DynamicFormScreen for entire flow
+ * Screen transitions happen via ViewModel state updates, not navigation
+ * Screen ID comes from ViewModel state (formScreen.screenId or runtimeSession.currentScreenId)
+ */
 fun DynamicFormScreen(
-    target: String,
+    flowId: String? = null,
+    productCode: String? = null,
+    partnerCode: String? = null,
+    branchCode: String? = null,
     onNavigateBack: () -> Unit,
-    onNavigateToNext: (String) -> Unit,
     viewModel: DynamicFormViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -107,24 +114,66 @@ fun DynamicFormScreen(
         }
     }
 
-    LaunchedEffect(target) {
-        // Always use Runtime API to get screen configuration
-        // This ensures we use POST /api/v1/runtime/next-screen instead of deprecated GET /api/v1/form/{target}
-        val isInitialLoad = uiState.formScreen == null
-        val restoreData = viewModel.getPendingRestoreData()
-        
-        // Use Runtime API to load screen configuration
-        // For initial load: currentScreenId = null
-        // For subsequent loads: currentScreenId = target (screenId from previous response)
-        viewModel.loadScreenViaRuntimeApi(
-            currentScreenId = if (isInitialLoad) null else target,
-            restoreData = restoreData
-        )
+    // Handle flow completion - navigate back to Home when flow ends
+    LaunchedEffect(uiState.isFlowCompleted) {
+        if (uiState.isFlowCompleted) {
+            android.util.Log.d("DynamicFormScreen", "Flow completed - navigating back to Home")
+            // Reset completion flag and navigate back to Home
+            viewModel.resetFlowCompletion()
+            onNavigateBack()
+        }
     }
 
-    LaunchedEffect(uiState.nextScreen) {
-        uiState.nextScreen?.let(onNavigateToNext)
+    // CRITICAL: LaunchedEffect MUST NOT call Runtime API for screen transitions
+    // Runtime API is called ONLY from:
+    // 1. startFlow() - when entering from Home (runtimeSession == null)
+    // 2. submitForm() - when user submits form
+    // Screen transitions happen via ViewModel state updates - UI recomposes automatically
+    LaunchedEffect(flowId, productCode, partnerCode, branchCode, uiState.runtimeSession, uiState.isFlowCompleted) {
+        val runtimeSession = uiState.runtimeSession
+        val currentScreen = uiState.formScreen
+        
+        android.util.Log.d("DynamicFormScreen", "LaunchedEffect triggered - runtimeSession: ${runtimeSession?.applicationId}, currentScreen: ${currentScreen?.screenId}, flowId: $flowId, isFlowCompleted: ${uiState.isFlowCompleted}")
+        
+        // If flow has completed, don't restart it
+        if (uiState.isFlowCompleted) {
+            android.util.Log.d("DynamicFormScreen", "Flow completed - not restarting")
+            return@LaunchedEffect
+        }
+        
+        // If runtimeSession exists, flow has already started
+        // Screen transitions happen via state updates from submitForm() - no action needed
+        if (runtimeSession != null) {
+            android.util.Log.d("DynamicFormScreen", "Flow already started - applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}")
+            return@LaunchedEffect
+        }
+        
+        // FLOW START MODE: runtimeSession == null
+        // This happens ONLY when entering from Home (dashboard click)
+        // Call startFlow() ONLY if we have required parameters
+        if (uiState.isRestoringFromBack || uiState.isLoadingFromResponse) {
+            android.util.Log.d("DynamicFormScreen", "Skipping flow start - restoring or loading")
+            return@LaunchedEffect
+        }
+        
+        // Validate required parameters for flow start
+        if (flowId == null || productCode == null) {
+            android.util.Log.w("DynamicFormScreen", "Flow start parameters missing - flowId: $flowId, productCode: $productCode")
+            return@LaunchedEffect
+        }
+        
+        // Call startFlow() - ONLY place where flow start Runtime API is called
+        android.util.Log.d("DynamicFormScreen", "🚀 Calling startFlow() - flowId: $flowId, productCode: $productCode")
+        viewModel.startFlow(
+            flowId = flowId,
+            productCode = productCode,
+            partnerCode = partnerCode,
+            branchCode = branchCode
+        )
     }
+    
+    // Screen ID comes from ViewModel state, not navigation params
+    val currentScreenId = uiState.formScreen?.screenId ?: uiState.runtimeSession?.currentScreenId
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let { snackbarHostState.showSnackbar(it) }
@@ -140,28 +189,22 @@ fun DynamicFormScreen(
 
     val formScreen = uiState.formScreen
     val allowBackNavigation = formScreen?.layout?.allowBackNavigation ?: true // Default to true for backward compatibility
-    
+
     // Handle system back button - respect allowBackNavigation flag
     BackHandler(enabled = allowBackNavigation) {
         if (allowBackNavigation) {
         viewModel.handleBackNavigation(
-                applicationId = null, // Not sent to backend
-            onNavigateToScreen = { screenId ->
-                onNavigateToNext(screenId)
+            onExitFlow = {
+                // Exit flow - reset completion flag and navigate back to Home
+                viewModel.resetFlowCompletion()
+                onNavigateBack()
             },
-                onExitFlow = {
-                    // Exit flow - navigate to home or previous activity
-                    // For now, just show a message (UI should handle actual navigation)
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar("Exiting flow")
-                    }
-                },
-                onError = { error ->
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar(error)
-                    }
+            onError = { error ->
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(error)
                 }
-            )
+            }
+        )
         }
         // If allowBackNavigation is false, BackHandler is disabled, so back is blocked
     }
@@ -184,33 +227,28 @@ fun DynamicFormScreen(
                     ) {
                         // Show back button only if allowBackNavigation is true
                         if (allowBackNavigation) {
-                        IconButton(
-                            onClick = {
-                                    viewModel.handleBackNavigation(
-                                        applicationId = null, // Not sent to backend
-                                        onNavigateToScreen = { screenId ->
-                                            onNavigateToNext(screenId)
-                                        },
-                                        onExitFlow = {
-                                            // Exit flow - navigate to home or previous activity
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Exiting flow")
-                                            }
-                                        },
+                            IconButton(
+                                onClick = {
+                                viewModel.handleBackNavigation(
+                                    onExitFlow = {
+                                        // Exit flow - reset completion flag and navigate back to Home
+                                        viewModel.resetFlowCompletion()
+                                        onNavigateBack()
+                                    },
                                         onError = { error ->
                                             coroutineScope.launch {
                                                 snackbarHostState.showSnackbar(error)
                                             }
                                         }
                                     )
-                            },
-                            modifier = Modifier.align(Alignment.CenterStart)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
+                                },
+                                modifier = Modifier.align(Alignment.CenterStart)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
                             }
                         }
                         Text(

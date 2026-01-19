@@ -583,8 +583,10 @@ data class NextScreenRequestDto(
 )
 
 data class NextScreenResponseDto(
+    @SerializedName("applicationId") val applicationId: Int? = null,
     @SerializedName("nextScreenId") val nextScreenId: String,
-    @SerializedName("screenConfig") val screenConfig: FormScreenDto
+    @SerializedName("screenConfig") val screenConfig: FormScreenDto,
+    @SerializedName("status") val status: String? = null
 )
 
 // Legacy Flow Engine API DTOs - Deprecated: Use Runtime API instead

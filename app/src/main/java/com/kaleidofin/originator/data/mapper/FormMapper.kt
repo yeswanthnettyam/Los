@@ -44,8 +44,9 @@ fun HiddenFieldDto.toDomain(): HiddenField {
 }
 
 fun SectionDto.toDomain(): FormSection {
+    val parentSectionId = actualSectionId
     return FormSection(
-        sectionId = actualSectionId,
+        sectionId = parentSectionId,
         title = title,
         collapsible = collapsible ?: false,
         expanded = actualExpanded,
@@ -57,7 +58,16 @@ fun SectionDto.toDomain(): FormSection {
         instanceLabel = instanceLabel,
         validationRules = validationRules?.map { it.toDomain() } ?: emptyList(),
         fields = fields?.map { it.toDomain() } ?: emptyList(),
-        subSections = subSections?.map { it.toDomain() } ?: emptyList(),
+        // Map subsections and ensure they have the correct parent reference
+        subSections = subSections?.map { subSectionDto ->
+            // If subsection doesn't have parentSectionId set, set it to this section's ID
+            val subSectionWithParent = if (subSectionDto.parentSectionId == null && subSectionDto.subSectionOf == null) {
+                subSectionDto.copy(parentSectionId = parentSectionId)
+            } else {
+                subSectionDto
+            }
+            subSectionWithParent.toDomain()
+        } ?: emptyList(),
         subSectionOf = actualSubSectionOf
     )
 }

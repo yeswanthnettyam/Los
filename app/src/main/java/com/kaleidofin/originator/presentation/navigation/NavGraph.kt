@@ -15,8 +15,22 @@ sealed class Screen(val route: String) {
     object Login : Screen("login")
     object Home : Screen("home")
     object ForgotPassword : Screen("forgot_password")
-    object DynamicForm : Screen("dynamic_form/{target}") {
-        fun createRoute(target: String) = "dynamic_form/$target"
+    // SINGLE DynamicForm route for entire flow - no target parameter
+    // Screen transitions happen via ViewModel state updates, not navigation
+    object DynamicForm : Screen("dynamic_form/{flowId}/{productCode}/{partnerCode}/{branchCode}") {
+        fun createRoute(
+            flowId: String? = null,
+            productCode: String? = null,
+            partnerCode: String? = null,
+            branchCode: String? = null
+        ): String {
+            // Use empty string as placeholder for null values (Navigation Compose doesn't support truly optional path parameters)
+            val flowIdParam = flowId ?: ""
+            val productCodeParam = productCode ?: ""
+            val partnerCodeParam = partnerCode ?: ""
+            val branchCodeParam = branchCode ?: ""
+            return "dynamic_form/$flowIdParam/$productCodeParam/$partnerCodeParam/$branchCodeParam"
+        }
     }
 }
 
@@ -44,26 +58,46 @@ fun NavGraph(navController: NavHostController) {
                 onNavigateBack = {
                     navController.popBackStack()
                 },
-                onNavigateToDynamicForm = { target ->
-                    navController.navigate(Screen.DynamicForm.createRoute(target))
+                onNavigateToDynamicForm = { target, flowId, productCode, partnerCode, branchCode ->
+                    // Navigate to DynamicFormScreen - single route for entire flow
+                    // Screen transitions happen via ViewModel state, not navigation
+                    navController.navigate(
+                        Screen.DynamicForm.createRoute(
+                            flowId = flowId,
+                            productCode = productCode,
+                            partnerCode = partnerCode,
+                            branchCode = branchCode
+                        )
+                    )
                 }
             )
         }
         
         composable(
             route = Screen.DynamicForm.route,
-            arguments = listOf(navArgument("target") { type = NavType.StringType })
+            arguments = listOf(
+                navArgument("flowId") { type = NavType.StringType },
+                navArgument("productCode") { type = NavType.StringType },
+                navArgument("partnerCode") { type = NavType.StringType },
+                navArgument("branchCode") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
-            val target = backStackEntry.arguments?.getString("target") ?: ""
+            // Convert empty string back to null
+            fun String?.toNullable(): String? = if (this.isNullOrBlank()) null else this
+            val flowId = backStackEntry.arguments?.getString("flowId")?.toNullable()
+            val productCode = backStackEntry.arguments?.getString("productCode")?.toNullable()
+            val partnerCode = backStackEntry.arguments?.getString("partnerCode")?.toNullable()
+            val branchCode = backStackEntry.arguments?.getString("branchCode")?.toNullable()
+            
+            // SINGLE DynamicFormScreen for entire flow
+            // Screen transitions happen via ViewModel state updates, not navigation
             DynamicFormScreen(
-                target = target,
+                flowId = flowId,
+                productCode = productCode,
+                partnerCode = partnerCode,
+                branchCode = branchCode,
                 onNavigateBack = {
                     navController.popBackStack()
-                },
-                onNavigateToNext = { nextTarget ->
-                    // Navigate to next screen without popping previous screens
-                    // This maintains the back stack so back button works correctly
-                    navController.navigate(Screen.DynamicForm.createRoute(nextTarget))
                 }
             )
         }

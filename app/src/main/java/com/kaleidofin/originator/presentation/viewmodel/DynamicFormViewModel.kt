@@ -1,10 +1,12 @@
 package com.kaleidofin.originator.presentation.viewmodel
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaleidofin.originator.domain.model.FormField
 import com.kaleidofin.originator.domain.usecase.GetMasterDataUseCase
 import com.kaleidofin.originator.presentation.ui.state.DynamicFormUiState
+import com.kaleidofin.originator.presentation.ui.state.RuntimeSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +16,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.kaleidofin.originator.data.datasource.FormDataSource
 import com.kaleidofin.originator.data.mapper.toDomain
+import com.google.gson.Gson
 
 // FlowStep data class removed - navigation is now backend-driven
 // Keeping for potential future use if needed, but flow stack management is removed
@@ -31,16 +34,60 @@ data class NavigationStackEntry(
 @HiltViewModel
 class DynamicFormViewModel @Inject constructor(
     private val getMasterDataUseCase: GetMasterDataUseCase,
-    private val formDataSource: FormDataSource
+    private val formDataSource: FormDataSource,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     // Local navigation stack for back navigation
     // Backend manages flow snapshot; Android uses this for local back button handling
     private val _navigationStack = mutableListOf<NavigationStackEntry>()
     
+    // Gson for serializing RuntimeSession to SavedStateHandle
+    private val gson = Gson()
+    
+    /**
+     * Get RuntimeSession from SavedStateHandle (backup) or return null
+     */
+    private fun getRuntimeSessionFromSavedState(): RuntimeSession? {
+        val sessionJson = savedStateHandle.get<String>("runtimeSession")
+        return if (sessionJson != null) {
+            try {
+                gson.fromJson(sessionJson, RuntimeSession::class.java)
+            } catch (e: Exception) {
+                android.util.Log.e("DynamicFormViewModel", "Failed to deserialize RuntimeSession from SavedStateHandle", e)
+                null
+            }
+        } else {
+            null
+        }
+    }
+    
+    /**
+     * Save RuntimeSession to SavedStateHandle (backup)
+     */
+    private fun saveRuntimeSessionToSavedState(session: RuntimeSession?) {
+        if (session != null) {
+            try {
+                val sessionJson = gson.toJson(session)
+                savedStateHandle["runtimeSession"] = sessionJson
+            } catch (e: Exception) {
+                android.util.Log.e("DynamicFormViewModel", "Failed to serialize RuntimeSession to SavedStateHandle", e)
+            }
+        } else {
+            savedStateHandle.remove<String>("runtimeSession")
+        }
+    }
+    
     // Helper method to load screen config from DTO (from Flow API responses)
     // This method processes screenConfig from Flow Engine APIs without making additional API calls
-    private suspend fun loadScreenFromDto(screenConfigDto: com.kaleidofin.originator.data.dto.FormScreenDto, restoreData: Map<String, Any>? = null) {
+    private suspend fun loadScreenFromDto(
+        screenConfigDto: com.kaleidofin.originator.data.dto.FormScreenDto, 
+        restoreData: Map<String, Any>? = null,
+        nextScreenId: String? = null, // Optional: set nextScreen in same state update for atomicity
+        applicationId: Int? = null, // Optional: set applicationId in same state update for atomicity
+        isLoadingFromResponse: Boolean = false, // Flag to indicate loading from API response (prevents duplicate API calls)
+        updatedRuntimeSession: RuntimeSession? = null // Optional: update RuntimeSession atomically with screen load
+    ) {
         // Convert DTO to domain model using mapper
         val formScreen = screenConfigDto.toDomain()
         
@@ -135,20 +182,28 @@ class DynamicFormViewModel @Inject constructor(
                 }
             }
 
-            // If restoreData is provided, merge it with initial data
-        // Wrap restoreData values if they're not already wrapped
-            val finalFormData = if (restoreData != null) {
-                val mergedData = initialData.toMutableMap()
-            restoreData.forEach { (key, value) ->
-                // Check if value is already wrapped, if not wrap it
-                val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
-                    value // Already wrapped
-                } else {
-                    mapOf("value" to value) // Wrap it
+            // If restoreData is provided, use it as the primary source (for back navigation)
+            // Wrap restoreData values if they're not already wrapped
+            val finalFormData = if (restoreData != null && restoreData.isNotEmpty()) {
+                android.util.Log.d("DynamicFormViewModel", "Restoring form data - ${restoreData.size} fields")
+                val restoredData = mutableMapOf<String, Any>()
+                restoreData.forEach { (key, value) ->
+                    // Check if value is already wrapped, if not wrap it
+                    val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
+                        value // Already wrapped
+                    } else {
+                        mapOf("value" to value) // Wrap it
+                    }
+                    restoredData[key] = wrappedValue
+                    android.util.Log.d("DynamicFormViewModel", "Restored field: $key = $wrappedValue")
                 }
-                mergedData[key] = wrappedValue
-            }
-                mergedData
+                // Merge with initialData for fields that don't exist in restoreData
+                initialData.forEach { (key, value) ->
+                    if (!restoredData.containsKey(key)) {
+                        restoredData[key] = value
+                    }
+                }
+                restoredData
             } else {
                 initialData
             }
@@ -161,13 +216,42 @@ class DynamicFormViewModel @Inject constructor(
                     masterData = masterDataMap,
                     inlineData = inlineDataMap,
                     isLoading = false,
-                    fieldErrors = emptyMap() // Clear errors when loading/restoring
+                    fieldErrors = emptyMap(), // Clear errors when loading/restoring
+                    nextScreen = nextScreenId ?: it.nextScreen, // Set nextScreen if provided, otherwise keep existing
+                    applicationId = applicationId ?: it.applicationId, // Set applicationId if provided, otherwise keep existing
+                    isLoadingFromResponse = isLoadingFromResponse, // Set flag to prevent duplicate API calls
+                    runtimeSession = updatedRuntimeSession ?: it.runtimeSession // Update RuntimeSession atomically if provided
                 )
-        }
+            }
+            
+            // Save RuntimeSession to SavedStateHandle if updated
+            if (updatedRuntimeSession != null) {
+                saveRuntimeSessionToSavedState(updatedRuntimeSession)
+            }
+            
+            // Clear the flag after a delay to allow LaunchedEffect to check it
+            // Increased delay to ensure navigation completes and LaunchedEffect re-runs with updated state
+            if (isLoadingFromResponse) {
+                kotlinx.coroutines.delay(500)
+                _uiState.update { it.copy(isLoadingFromResponse = false) }
+            }
     }
 
-    private val _uiState = MutableStateFlow(DynamicFormUiState())
+    private val _uiState = MutableStateFlow(
+        DynamicFormUiState(
+            runtimeSession = getRuntimeSessionFromSavedState() // Restore from SavedStateHandle on init
+        )
+    )
     val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
+    
+    init {
+        // Restore runtimeSession from SavedStateHandle if available
+        val restoredSession = getRuntimeSessionFromSavedState()
+        if (restoredSession != null) {
+            _uiState.update { it.copy(runtimeSession = restoredSession) }
+            android.util.Log.d("DynamicFormViewModel", "Restored RuntimeSession from SavedStateHandle: $restoredSession")
+        }
+    }
 
     // Flow stack removed - navigation is now backend-driven
 
@@ -186,16 +270,48 @@ class DynamicFormViewModel @Inject constructor(
      * @param partnerCode Partner code (optional, defaults to SAMASTA)
      * @param branchCode Branch code (optional)
      */
-    fun loadScreenViaRuntimeApi(
-        currentScreenId: String? = null,
-        restoreData: Map<String, Any>? = null,
-        flowId: String? = null,
-        productCode: String? = null,
+    /**
+     * START FLOW - Called ONLY when user clicks a module card from dashboard
+     * This is the ONLY place where flow start Runtime API is called
+     * 
+     * STRICT RULES:
+     * - Must be called ONLY from dashboard navigation
+     * - runtimeSession MUST be null (flow not started)
+     * - Creates RuntimeSession and stores applicationId
+     * 
+     * @param flowId Flow ID (required)
+     * @param productCode Product code (required)
+     * @param partnerCode Partner code (optional, defaults to SAMASTA)
+     * @param branchCode Branch code (optional)
+     */
+    fun startFlow(
+        flowId: String,
+        productCode: String,
         partnerCode: String? = null,
         branchCode: String? = null
     ) {
         viewModelScope.launch {
-            // Preserve flow context when updating state
+            val state = _uiState.value
+            val runtimeSession = state.runtimeSession
+            
+            // CRITICAL INVARIANT: If runtimeSession exists, flow has already started
+            // DO NOT call flow start API again - this would create a new application
+            if (runtimeSession != null) {
+                android.util.Log.e("DynamicFormViewModel", "🚨 VIOLATION: startFlow() called but runtimeSession exists! applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "Flow already in progress. Current screen: ${runtimeSession.currentScreenId}"
+                    )
+                }
+                return@launch
+            }
+            
+            // Validate required parameters
+            val finalPartnerCode = partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
+            
+            android.util.Log.d("DynamicFormViewModel", "🚀 START FLOW - flowId: $flowId, productCode: $productCode, partnerCode: $finalPartnerCode")
+            
             _uiState.update { 
                 it.copy(
                     isLoading = true,
@@ -204,112 +320,88 @@ class DynamicFormViewModel @Inject constructor(
             }
             
             try {
-                // Get flow context from state (stored from initial load) or use provided parameters
-                val state = _uiState.value
-                val finalFlowId = flowId ?: state.flowId
-                val finalProductCode = productCode ?: state.productCode
-                val finalPartnerCode = partnerCode?.takeIf { it.isNotBlank() } ?: state.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
-                val finalBranchCode = branchCode ?: state.branchCode
+                // Clear navigation stack for new flow
+                _navigationStack.clear()
                 
-                // Validate that required flow context is available (for initial load)
-                if (currentScreenId == null && (finalFlowId == null || finalProductCode == null)) {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Flow context (flowId, productCode) is required to start flow"
-                        )
-                    }
-                    return@launch
-                }
+                // Call Runtime API - FLOW START MODE
+                // applicationId = null, currentScreenId = null
+                android.util.Log.d("DynamicFormViewModel", "📡 Runtime API CALL (FLOW START) - applicationId: null, currentScreenId: null, flowId: $flowId, productCode: $productCode")
                 
-                // If this is initial load, clear navigation stack and store flow context
-                if (currentScreenId == null) {
-                    _navigationStack.clear()
-                    // Store flow context in state for subsequent calls
-                    _uiState.update {
-                        it.copy(
-                            flowId = finalFlowId,
-                            productCode = finalProductCode,
-                            partnerCode = finalPartnerCode,
-                            branchCode = finalBranchCode
-                        )
-                    }
-                }
-                
-                // For subsequent loads, ensure we have flow context from state
-                val requestFlowId = finalFlowId ?: state.flowId
-                val requestProductCode = finalProductCode ?: state.productCode
-                
-                if (requestFlowId == null || requestProductCode == null) {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Flow context missing. Please restart the flow."
-                        )
-                    }
-                    return@launch
-                }
-                
-                // Call Runtime API - POST /api/v1/runtime/next-screen
-                // Backend evaluates flow, resolves config, manages snapshot
                 val response = formDataSource.nextScreen(
-                    applicationId = null, // Not sent
-                    currentScreenId = currentScreenId, // null for initial load, screenId for subsequent
-                    flowId = requestFlowId,
-                    productCode = requestProductCode,
+                    applicationId = null, // Flow start - no applicationId yet
+                    currentScreenId = null, // Flow start - no current screen
+                    flowId = flowId,
+                    productCode = productCode,
                     partnerCode = finalPartnerCode,
-                    branchCode = finalBranchCode,
-                    formData = restoreData?.let { 
-                        // Unwrap values from { "value": ... } objects if needed
-                        it.mapValues { entry ->
-                            val value = entry.value
-                            if (value is Map<*, *> && value.containsKey("value")) {
-                                value["value"]!!
-                            } else {
-                                value
-                            }
-                        }
-                    }
+                    branchCode = branchCode,
+                    formData = null // Flow start - no form data
                 )
                 
-                // Push screen to navigation stack (for back navigation)
+                // Extract applicationId from response
+                val applicationId = response.applicationId
+                val nextScreenId = response.nextScreenId
+                
+                android.util.Log.d("DynamicFormViewModel", "✅ Runtime API RESPONSE (FLOW START) - applicationId: $applicationId, nextScreenId: $nextScreenId")
+                
+                if (applicationId == null || nextScreenId == null) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Invalid response: applicationId or nextScreenId is null"
+                        )
+                    }
+                    return@launch
+                }
+                
+                // Create RuntimeSession - flow has started
+                val newRuntimeSession = RuntimeSession(
+                    applicationId = applicationId.toLong(),
+                    flowId = flowId,
+                    currentScreenId = nextScreenId
+                )
+                
+                // Save to SavedStateHandle (backup)
+                saveRuntimeSessionToSavedState(newRuntimeSession)
+                
+                // Update state with RuntimeSession and flow context
+                _uiState.update {
+                    it.copy(
+                        runtimeSession = newRuntimeSession,
+                        productCode = productCode,
+                        partnerCode = finalPartnerCode,
+                        branchCode = branchCode,
+                        // Legacy fields for backward compatibility
+                        applicationId = applicationId,
+                        flowId = flowId
+                    )
+                }
+                
+                // Push first screen to navigation stack
                 _navigationStack.add(
                     NavigationStackEntry(
-                        screenId = response.nextScreenId,
+                        screenId = nextScreenId,
                         screenConfig = response.screenConfig,
-                        formData = restoreData
+                        formData = null
                     )
                 )
                 
-                // Extract and store flow context from screen config if available
-                val screenConfig = response.screenConfig
-                val currentStateForExtraction = _uiState.value
-                val extractedFlowId = screenConfig.flowId ?: finalFlowId ?: currentStateForExtraction.flowId
-                val extractedProductCode = screenConfig.scope?.productCode ?: finalProductCode ?: currentStateForExtraction.productCode
-                val extractedPartnerCode = screenConfig.scope?.partnerCode?.takeIf { it.isNotBlank() } 
-                    ?: finalPartnerCode?.takeIf { it.isNotBlank() } 
-                    ?: currentStateForExtraction.partnerCode?.takeIf { it.isNotBlank() } 
-                    ?: "SAMASTA"
-                val extractedBranchCode = screenConfig.scope?.branchCode ?: finalBranchCode ?: currentStateForExtraction.branchCode
+                // Load screen config from response
+                loadScreenFromDto(
+                    response.screenConfig,
+                    restoreData = null,
+                    nextScreenId = null, // Don't set nextScreen - we're already on this screen
+                    applicationId = applicationId,
+                    isLoadingFromResponse = false, // This is flow start, not form submission
+                    updatedRuntimeSession = newRuntimeSession // Set RuntimeSession atomically
+                )
                 
-                // Update state with flow context (from screen config, parameters, or existing state)
-                // Always preserve existing flow context if new values are not available
-                _uiState.update { currentState ->
-                    currentState.copy(
-                        flowId = extractedFlowId ?: currentState.flowId,
-                        productCode = extractedProductCode ?: currentState.productCode,
-                        partnerCode = extractedPartnerCode,
-                        branchCode = extractedBranchCode ?: currentState.branchCode
-                    )
-                }
-                
-                // Load screen config directly from response - NO separate API call
-                loadScreenFromDto(screenConfig, restoreData = restoreData)
+                android.util.Log.d("DynamicFormViewModel", "✅ FLOW STARTED - applicationId: $applicationId, firstScreen: $nextScreenId")
             } catch (e: Exception) {
+                android.util.Log.e("DynamicFormViewModel", "❌ FLOW START FAILED", e)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        error = e.message ?: "Failed to load screen"
+                        error = e.message ?: "Failed to start flow"
                     )
                 }
             }
@@ -320,10 +412,10 @@ class DynamicFormViewModel @Inject constructor(
      * Start flow using Runtime API (POST /api/v1/runtime/next-screen with currentScreenId = null)
      * Clears navigation stack and loads initial screen
      * 
-     * @deprecated Use loadScreenViaRuntimeApi() instead - this method is kept for backward compatibility
+     * @deprecated Use startFlow(flowId, productCode, ...) instead - this method is kept for backward compatibility
      */
-    @Deprecated("Use loadScreenViaRuntimeApi() instead")
-    fun startFlow(applicationId: String, flowType: String? = null) {
+    @Deprecated("Use startFlow(flowId, productCode, ...) instead")
+    fun startFlowLegacy(applicationId: String, flowType: String? = null) {
         viewModelScope.launch {
             // Preserve flow context when updating state
             _uiState.update { 
@@ -940,6 +1032,20 @@ class DynamicFormViewModel @Inject constructor(
             _uiState.update { it.copy(isSubmitting = true, error = null) }
             
             try {
+                // Get RuntimeSession - REQUIRED for screen progression
+                val currentState = _uiState.value
+                val runtimeSession = currentState.runtimeSession
+                
+                if (runtimeSession == null) {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            error = "Flow not started. Please restart the flow."
+                        )
+                    }
+                    return@launch
+                }
+                
                 // Unwrap values from { "value": ... } objects before sending to backend
                 val unwrappedFormData = state.formData.filterValues { it != null }.mapValues { entry ->
                     val wrapped = entry.value!!
@@ -953,70 +1059,148 @@ class DynamicFormViewModel @Inject constructor(
                 // Update dummy JSON with form data for testing (if needed)
                 formDataSource.updateFormData(screen.screenId, unwrappedFormData)
                 
-                // Get flow context from state (stored from initial load)
-                val currentState = _uiState.value
-                val flowId = currentState.flowId
-                val productCode = currentState.productCode
+                // Get flow context from RuntimeSession and state
                 val partnerCode = currentState.partnerCode?.takeIf { it.isNotBlank() } ?: "SAMASTA"
                 val branchCode = currentState.branchCode
                 
-                // Validate that required flow context is available
-                if (flowId == null || productCode == null) {
+                android.util.Log.d("DynamicFormViewModel", "📤 SCREEN SUBMIT - applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}")
+                
+                // Call Runtime API - SCREEN PROGRESSION MODE
+                // applicationId and currentScreenId from RuntimeSession
+                android.util.Log.d("DynamicFormViewModel", "📡 Runtime API CALL (SCREEN PROGRESSION) - applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}, flowId: ${runtimeSession.flowId}")
+                
+                val response = formDataSource.nextScreen(
+                    applicationId = runtimeSession.applicationId.toString(), // From RuntimeSession
+                    currentScreenId = runtimeSession.currentScreenId, // From RuntimeSession
+                    flowId = runtimeSession.flowId, // From RuntimeSession
+                    productCode = currentState.productCode ?: throw IllegalStateException("productCode is null"),
+                    partnerCode = partnerCode,
+                    branchCode = branchCode,
+                    formData = unwrappedFormData // Send ONLY formData values
+                )
+                
+                android.util.Log.d("DynamicFormViewModel", "✅ Runtime API RESPONSE (SCREEN PROGRESSION) - applicationId: ${response.applicationId}, nextScreenId: ${response.nextScreenId}, status: ${response.status}")
+                
+                // Extract response data
+                val screenConfig = response.screenConfig
+                val nextScreenId = response.nextScreenId
+                val responseApplicationId = response.applicationId
+                val responseStatus = response.status
+                
+                // FLOW COMPLETION HANDLING
+                // If nextScreenId is null and status is COMPLETED, flow has ended
+                if (nextScreenId == null && responseStatus == "COMPLETED") {
+                    android.util.Log.d("DynamicFormViewModel", "Flow completed - applicationId: ${runtimeSession.applicationId}")
+                    
+                    // Clear RuntimeSession - flow is complete
+                    saveRuntimeSessionToSavedState(null)
+                    
                     _uiState.update {
                         it.copy(
+                            runtimeSession = null,
                             isSubmitting = false,
-                            error = "Flow context missing. Please restart the flow."
+                            isFlowCompleted = true, // Mark flow as completed - prevents restart
+                            // Legacy fields
+                            applicationId = null,
+                            flowId = null
                         )
                     }
+                    
+                    // TODO: Navigate to dashboard or success screen
+                    // For now, just log - UI should handle navigation
+                    android.util.Log.d("DynamicFormViewModel", "Flow completed. Navigate to dashboard or success screen.")
                     return@launch
                 }
                 
-                // Call Runtime API - POST /api/v1/runtime/next-screen
-                // Backend evaluates flow, resolves config, manages snapshot
-                val response = formDataSource.nextScreen(
-                    applicationId = null, // Not sent
-                    currentScreenId = screen.screenId,
-                    flowId = flowId,
-                    productCode = productCode,
-                    partnerCode = partnerCode,
-                    branchCode = branchCode,
-                    formData = unwrappedFormData
-                )
+                // Validate response - if nextScreenId is null, flow has ended
+                if (nextScreenId == null) {
+                    android.util.Log.d("DynamicFormViewModel", "Flow ended - nextScreenId is null (applicationId: ${runtimeSession.applicationId})")
+                    
+                    // Clear RuntimeSession - flow is complete
+                    saveRuntimeSessionToSavedState(null)
+                    
+                    _uiState.update {
+                        it.copy(
+                            runtimeSession = null,
+                            isSubmitting = false,
+                            isFlowCompleted = true, // Mark flow as completed - triggers navigation back to Home
+                            // Legacy fields
+                            applicationId = null,
+                            flowId = null
+                        )
+                    }
+                    
+                    android.util.Log.d("DynamicFormViewModel", "Flow ended. Navigating back to Home.")
+                    return@launch
+                }
                 
-                // Extract and store flow context from screen config response (if available)
-                val screenConfig = response.screenConfig
-                val extractedFlowId = screenConfig.flowId ?: flowId ?: state.flowId
-                val extractedProductCode = screenConfig.scope?.productCode ?: productCode ?: state.productCode
+                // Verify applicationId matches (should always match, but check for safety)
+                if (responseApplicationId != null && responseApplicationId.toLong() != runtimeSession.applicationId) {
+                    android.util.Log.w("DynamicFormViewModel", "ApplicationId mismatch: expected ${runtimeSession.applicationId}, got $responseApplicationId")
+                }
+                
+                // Update RuntimeSession with new currentScreenId
+                val updatedRuntimeSession = runtimeSession.copy(currentScreenId = nextScreenId)
+                
+                // Extract flow context from screen config response (if available)
+                val extractedProductCode = screenConfig.scope?.productCode ?: currentState.productCode
                 val extractedPartnerCode = screenConfig.scope?.partnerCode?.takeIf { it.isNotBlank() } 
                     ?: partnerCode?.takeIf { it.isNotBlank() } 
-                    ?: state.partnerCode?.takeIf { it.isNotBlank() } 
+                    ?: currentState.partnerCode?.takeIf { it.isNotBlank() } 
                     ?: "SAMASTA"
-                val extractedBranchCode = screenConfig.scope?.branchCode ?: branchCode ?: state.branchCode
+                val extractedBranchCode = screenConfig.scope?.branchCode ?: branchCode ?: currentState.branchCode
+                
+                // Store CURRENT screen's formData BEFORE moving to next screen
+                // Update CURRENT screen's entry in stack with its formData (for back navigation)
+                val currentScreenFormData = state.formData.toMap() // Create a copy to avoid reference issues
+                android.util.Log.d("DynamicFormViewModel", "Storing formData for current screen: ${runtimeSession.currentScreenId}, fields: ${currentScreenFormData.keys}")
+                
+                // Find and update CURRENT screen's entry in stack with its formData
+                val currentScreenIndex = _navigationStack.indexOfFirst { it.screenId == runtimeSession.currentScreenId }
+                if (currentScreenIndex >= 0) {
+                    // Update existing entry with formData
+                    val currentEntry = _navigationStack[currentScreenIndex]
+                    _navigationStack[currentScreenIndex] = currentEntry.copy(formData = currentScreenFormData)
+                    android.util.Log.d("DynamicFormViewModel", "Updated stack entry for screen: ${runtimeSession.currentScreenId} with ${currentScreenFormData.size} fields")
+                } else {
+                    android.util.Log.w("DynamicFormViewModel", "Current screen ${runtimeSession.currentScreenId} not found in stack - this should not happen")
+                }
                 
                 // Push next screen to navigation stack (for local back navigation)
                 _navigationStack.add(
                     NavigationStackEntry(
-                        screenId = response.nextScreenId,
+                        screenId = nextScreenId,
                         screenConfig = screenConfig,
-                        formData = state.formData // Store wrapped form data for potential restoration
+                        formData = null // Next screen starts with empty formData
                     )
                 )
                 
-                // Update state with flow context (from screen config, parameters, or current state)
-                // Always preserve existing flow context if new values are not available
-                _uiState.update { currentState ->
-                    currentState.copy(
-                        flowId = extractedFlowId ?: currentState.flowId,
-                        productCode = extractedProductCode ?: currentState.productCode,
+                // Load next screen config directly from response
+                // Update RuntimeSession atomically with screen load
+                // NO navigation needed - UI will recompose automatically when state updates
+                loadScreenFromDto(
+                    screenConfig, 
+                    restoreData = null,
+                    nextScreenId = null, // Don't set nextScreen - no navigation needed
+                    applicationId = responseApplicationId ?: runtimeSession.applicationId.toInt(), // Use response applicationId or fallback to session
+                    isLoadingFromResponse = false, // Not needed - no navigation to prevent
+                    updatedRuntimeSession = updatedRuntimeSession // Update RuntimeSession atomically
+                )
+                
+                // Update state with flow context (RuntimeSession already updated by loadScreenFromDto)
+                _uiState.update { state ->
+                    state.copy(
+                        productCode = extractedProductCode ?: state.productCode,
                         partnerCode = extractedPartnerCode,
-                        branchCode = extractedBranchCode ?: currentState.branchCode,
+                        branchCode = extractedBranchCode ?: state.branchCode,
                         isSubmitting = false,
-                        nextScreen = response.nextScreenId
+                        // Legacy fields for backward compatibility
+                        applicationId = responseApplicationId ?: runtimeSession.applicationId.toInt(),
+                        flowId = runtimeSession.flowId
                     )
                 }
                 
-                // Load next screen config directly from response - NO separate API call
-                loadScreenFromDto(screenConfig, restoreData = null)
+                android.util.Log.d("DynamicFormViewModel", "✅ SCREEN SUBMITTED - nextScreenId: $nextScreenId, applicationId: ${updatedRuntimeSession.applicationId}")
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -1030,6 +1214,18 @@ class DynamicFormViewModel @Inject constructor(
 
     fun clearFirstErrorField() {
         _uiState.update { it.copy(firstErrorFieldId = null) }
+    }
+    
+    fun clearNextScreen() {
+        _uiState.update { it.copy(nextScreen = null) }
+    }
+    
+    /**
+     * Reset flow completion flag - called when navigating back to dashboard after flow completion
+     * This allows starting a new flow
+     */
+    fun resetFlowCompletion() {
+        _uiState.update { it.copy(isFlowCompleted = false) }
     }
     
     /* ---------------- MODAL HANDLING ---------------- */
@@ -1157,9 +1353,11 @@ class DynamicFormViewModel @Inject constructor(
      * 2. If at start screen -> exit flow (handled by UI)
      * 3. Backend snapshot allows editing previous screens
      */
+    /**
+     * Handle back navigation - restores previous screen from local navigation stack
+     * NO navigation needed - screen updates via state and UI recomposes
+     */
     fun handleBackNavigation(
-        applicationId: String? = null, // Not used - kept for backward compatibility
-        onNavigateToScreen: (String) -> Unit,
         onExitFlow: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -1182,14 +1380,40 @@ class DynamicFormViewModel @Inject constructor(
                 // Get previous screen from stack
                 val previousEntry = _navigationStack.last()
                 
+                android.util.Log.d("DynamicFormViewModel", "Navigating back to screen: ${previousEntry.screenId}, stored formData: ${previousEntry.formData?.keys ?: "null"}")
+                
+                // Update RuntimeSession with previous screen (if exists)
+                val currentState = _uiState.value
+                val updatedRuntimeSession = currentState.runtimeSession?.copy(currentScreenId = previousEntry.screenId)
+                if (updatedRuntimeSession != null) {
+                    saveRuntimeSessionToSavedState(updatedRuntimeSession)
+                }
+                
                 // Load previous screen config (already resolved by backend during forward navigation)
                 // Backend snapshot allows editing this screen again
-                loadScreenFromDto(previousEntry.screenConfig, restoreData = previousEntry.formData)
+                // Set flag to prevent LaunchedEffect from calling API
+                _uiState.update { 
+                    it.copy(
+                        isRestoringFromBack = true,
+                        runtimeSession = updatedRuntimeSession // Update RuntimeSession
+                    )
+                }
                 
-                // Navigate to previous screen
-                onNavigateToScreen(previousEntry.screenId)
+                // Restore previous screen with its formData - UI will recompose automatically
+                loadScreenFromDto(
+                    previousEntry.screenConfig, 
+                    restoreData = previousEntry.formData, // Restore formData from navigation stack
+                    updatedRuntimeSession = updatedRuntimeSession // Update RuntimeSession atomically
+                )
                 
-                _uiState.update { it.copy(isLoading = false) }
+                // Reset flag after a small delay
+                kotlinx.coroutines.delay(100)
+                _uiState.update { 
+                    it.copy(
+                        isLoading = false,
+                        isRestoringFromBack = false // Reset flag
+                    ) 
+                }
             } catch (e: Exception) {
                 _uiState.update { 
                     it.copy(
