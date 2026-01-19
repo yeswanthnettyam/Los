@@ -124,4 +124,14 @@ class HomeViewModel @Inject constructor(
     fun retry() {
         loadDashboardFlows()
     }
+    
+    /**
+     * Refresh dashboard flows (for pull-to-refresh)
+     * Prevents duplicate calls if already loading
+     */
+    fun refresh() {
+        if (!_uiState.value.isLoading) {
+            loadDashboardFlows()
+        }
+    }
 }
