@@ -83,7 +83,11 @@ data class FormField(
     // Dropdown multi-select configuration
     val selectionMode: String? = null, // "SINGLE" | "MULTIPLE", defaults to "SINGLE"
     val minSelections: Int? = null,
-    val maxSelections: Int? = null
+    val maxSelections: Int? = null,
+    // New field type configs
+    val cameraConfig: CameraConfig? = null,
+    val webViewConfig: WebViewConfig? = null,
+    val qrConfig: QRConfig? = null
 )
 
 data class FieldDataSource(
@@ -279,4 +283,41 @@ data class FormValidationRule(
     val message: String?,
     val pattern: String?,
     val executionTarget: String?
+)
+
+// Camera Capture Configuration
+data class CameraConfig(
+    val cameraType: String = "BACK", // "FRONT" | "BACK"
+    val minWidth: Int? = null,
+    val minHeight: Int? = null,
+    val enableBlurDetection: Boolean = true,
+    val uploadApi: CameraUploadApi?
+)
+
+data class CameraUploadApi(
+    val endpoint: String,
+    val method: String = "POST"
+)
+
+// WebView Launch Configuration
+data class WebViewConfig(
+    val urlSource: String, // "STATIC" | "API"
+    val staticUrl: String? = null, // Required if urlSource = "STATIC"
+    val launchApi: WebViewLaunchApi? = null // Required if urlSource = "API"
+)
+
+data class WebViewLaunchApi(
+    val endpoint: String,
+    val method: String = "POST"
+)
+
+// QR Scanner Configuration
+data class QRConfig(
+    val format: String = "JSON", // "JSON" only for now
+    val prefillMapping: List<QRPrefillMapping>
+)
+
+data class QRPrefillMapping(
+    val targetFieldId: String,
+    val qrKey: String
 )

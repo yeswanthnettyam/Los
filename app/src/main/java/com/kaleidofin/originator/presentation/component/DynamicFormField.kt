@@ -215,10 +215,21 @@ private fun DynamicSingleSelectDropdown(
     isEnabled: Boolean = true
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selected = value?.toString() ?: ""
+    
+    // Convert stored value to label for display (for STATIC_JSON fields)
+    val selected = remember(value, field.dataSource?.staticData) {
+        val storedValue = value?.toString() ?: ""
+        if (field.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+            // Find the label corresponding to the stored value
+            field.dataSource.staticData.find { it.value == storedValue }?.label ?: storedValue
+        } else {
+            storedValue
+        }
+    }
+    
     val interactionSource = remember { MutableInteractionSource() }
 
-    Log.d("DynamicDropdownField", "Field: ${field.id}, Selected: '$selected', Options count: ${options.size}, Options: $options")
+    Log.d("DynamicDropdownField", "Field: ${field.id}, Stored value: '${value?.toString()}', Display label: '$selected', Options count: ${options.size}, Options: $options")
 
     Box(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -309,12 +320,21 @@ private fun DynamicMultiSelectDropdown(
     var showBottomSheet by remember { mutableStateOf(false) }
     
     // Parse comma-separated value into list for edit/update support
-    val selectedValues = remember(value) {
+    // Note: stored values are values (for STATIC_JSON), but we need to convert to labels for display
+    val selectedValues = remember(value, field.dataSource?.staticData) {
         val valueStr = value?.toString() ?: ""
         if (valueStr.isBlank()) {
             emptySet<String>()
         } else {
-            valueStr.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+            val storedValues = valueStr.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+            // Convert stored values to labels for display (for STATIC_JSON fields)
+            if (field.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+                storedValues.mapNotNull { storedValue ->
+                    field.dataSource.staticData.find { it.value == storedValue }?.label
+                }.toSet()
+            } else {
+                storedValues
+            }
         }
     }
     
@@ -418,15 +438,21 @@ private fun DynamicMultiSelectDropdown(
                                                 }
                                             }
                                         }
-                                        // Store as comma-separated string
-                                        val newValue = newSelections.joinToString(",")
+                                        // Convert labels to values for storage (for STATIC_JSON fields)
+                                        val newValue = if (field.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+                                            newSelections.mapNotNull { label ->
+                                                field.dataSource.staticData.find { it.label == label }?.value
+                                            }.joinToString(",")
+                                        } else {
+                                            newSelections.joinToString(",")
+                                        }
                                         onValueChange(newValue)
                                     }
                                     .padding(vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Checkbox(
-                                    checked = selectedValues.contains(option),
+                                    checked = selectedValues.contains(option), // option is label, selectedValues contains labels
                                     onCheckedChange = null, // Handled by Row clickable
                                     enabled = isEnabled && (field.maxSelections == null || selectedValues.size < field.maxSelections || selectedValues.contains(option))
                                 )

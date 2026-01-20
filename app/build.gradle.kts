@@ -45,6 +45,14 @@ android {
     buildFeatures {
         compose = true
     }
+    
+    packaging {
+        jniLibs {
+            // Enable 16KB page size support for native libraries
+            // AGP 8.3+ automatically aligns libraries, but we ensure proper packaging
+            useLegacyPackaging = false
+        }
+    }
 }
 
 ksp {
@@ -95,6 +103,15 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
+    /* CameraX */
+    implementation("androidx.camera:camera-camera2:1.3.1")
+    implementation("androidx.camera:camera-lifecycle:1.3.1")
+    implementation("androidx.camera:camera-view:1.3.1")
+    
+    /* ML Kit - Latest versions (AGP 8.3+ automatically handles 16KB alignment) */
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.mlkit:image-labeling:17.0.9")
+    
     /* Testing */
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

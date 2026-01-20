@@ -108,7 +108,10 @@ fun FieldDto.toDomain(): FormField {
         apiVerificationConfig = apiVerificationConfig?.toDomain(),
         selectionMode = selectionMode,
         minSelections = minSelections,
-        maxSelections = maxSelections
+        maxSelections = maxSelections,
+        cameraConfig = cameraConfig?.toDomain(),
+        webViewConfig = webViewConfig?.toDomain(),
+        qrConfig = qrConfig?.toDomain()
     )
 }
 
@@ -361,5 +364,51 @@ fun FormValidationRuleDto.toDomain(): com.kaleidofin.originator.domain.model.For
         message = message,
         pattern = pattern,
         executionTarget = executionTarget
+    )
+}
+
+fun CameraConfigDto.toDomain(): com.kaleidofin.originator.domain.model.CameraConfig {
+    return com.kaleidofin.originator.domain.model.CameraConfig(
+        cameraType = cameraType ?: "BACK",
+        minWidth = minWidth,
+        minHeight = minHeight,
+        enableBlurDetection = enableBlurDetection ?: true,
+        uploadApi = uploadApi?.toDomain()
+    )
+}
+
+fun CameraUploadApiDto.toDomain(): com.kaleidofin.originator.domain.model.CameraUploadApi {
+    return com.kaleidofin.originator.domain.model.CameraUploadApi(
+        endpoint = endpoint,
+        method = method ?: "POST"
+    )
+}
+
+fun WebViewConfigDto.toDomain(): com.kaleidofin.originator.domain.model.WebViewConfig {
+    return com.kaleidofin.originator.domain.model.WebViewConfig(
+        urlSource = urlSource,
+        staticUrl = staticUrl,
+        launchApi = launchApi?.toDomain()
+    )
+}
+
+fun WebViewLaunchApiDto.toDomain(): com.kaleidofin.originator.domain.model.WebViewLaunchApi {
+    return com.kaleidofin.originator.domain.model.WebViewLaunchApi(
+        endpoint = endpoint,
+        method = method ?: "POST"
+    )
+}
+
+fun QRConfigDto.toDomain(): com.kaleidofin.originator.domain.model.QRConfig {
+    return com.kaleidofin.originator.domain.model.QRConfig(
+        format = format ?: "JSON",
+        prefillMapping = prefillMapping.map { it.toDomain() }
+    )
+}
+
+fun QRPrefillMappingDto.toDomain(): com.kaleidofin.originator.domain.model.QRPrefillMapping {
+    return com.kaleidofin.originator.domain.model.QRPrefillMapping(
+        targetFieldId = targetFieldId,
+        qrKey = qrKey
     )
 }

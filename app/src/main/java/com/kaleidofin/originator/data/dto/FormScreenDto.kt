@@ -213,7 +213,11 @@ data class FieldDto(
     // Dropdown multi-select configuration
     @SerializedName("selectionMode") val selectionMode: String? = null, // "SINGLE" | "MULTIPLE", defaults to "SINGLE"
     @SerializedName("minSelections") val minSelections: Int? = null,
-    @SerializedName("maxSelections") val maxSelections: Int? = null
+    @SerializedName("maxSelections") val maxSelections: Int? = null,
+    // New field type configs
+    @SerializedName("cameraConfig") val cameraConfig: CameraConfigDto? = null,
+    @SerializedName("webViewConfig") val webViewConfig: WebViewConfigDto? = null,
+    @SerializedName("qrConfig") val qrConfig: QRConfigDto? = null
 ) {
     // Helper to convert maxLength to Int
     val maxLengthInt: Int?
@@ -632,3 +636,39 @@ data class BackNavigationResponseDto(
     }
 }
 
+// Camera Config DTOs
+data class CameraConfigDto(
+    @SerializedName("cameraType") val cameraType: String? = "BACK",
+    @SerializedName("minWidth") val minWidth: Int? = null,
+    @SerializedName("minHeight") val minHeight: Int? = null,
+    @SerializedName("enableBlurDetection") val enableBlurDetection: Boolean? = true,
+    @SerializedName("uploadApi") val uploadApi: CameraUploadApiDto?
+)
+
+data class CameraUploadApiDto(
+    @SerializedName("endpoint") val endpoint: String,
+    @SerializedName("method") val method: String? = "POST"
+)
+
+// WebView Config DTOs
+data class WebViewConfigDto(
+    @SerializedName("urlSource") val urlSource: String, // "STATIC" | "API"
+    @SerializedName("staticUrl") val staticUrl: String? = null,
+    @SerializedName("launchApi") val launchApi: WebViewLaunchApiDto? = null
+)
+
+data class WebViewLaunchApiDto(
+    @SerializedName("endpoint") val endpoint: String,
+    @SerializedName("method") val method: String? = "POST"
+)
+
+// QR Config DTOs
+data class QRConfigDto(
+    @SerializedName("format") val format: String? = "JSON",
+    @SerializedName("prefillMapping") val prefillMapping: List<QRPrefillMappingDto>
+)
+
+data class QRPrefillMappingDto(
+    @SerializedName("targetFieldId") val targetFieldId: String,
+    @SerializedName("qrKey") val qrKey: String
+)

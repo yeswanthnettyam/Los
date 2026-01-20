@@ -200,8 +200,26 @@ data class DynamicFormUiState(
         val actualFieldId = if (sectionIndex != null) "${fieldId}_$sectionIndex" else fieldId
         val rawValue = formData[actualFieldId]
         val unwrappedValue = unwrapValue(rawValue)
-        val actualValue = unwrappedValue?.toString()?.trim() ?: ""
+        var actualValue = unwrappedValue?.toString()?.trim() ?: ""
+        
+        // Normalize stored value: if it's a label from STATIC_JSON field, convert to value
+        // This handles cases where old data might have labels stored instead of values
+        val field = formScreen?.sections?.flatMap { it.fields }
+            ?.plus(formScreen.sections.flatMap { it.subSections.flatMap { sub -> sub.fields } })
+            ?.find { it.id == fieldId }
+        
+        if (field?.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+            // Check if actualValue is a label - if so, convert to value
+            val matchingItem = field.dataSource.staticData.find { it.label == actualValue }
+            if (matchingItem != null) {
+                android.util.Log.d("DynamicFormUiState", "Normalizing stored label to value: field='$fieldId', label='$actualValue' -> value='${matchingItem.value}'")
+                actualValue = matchingItem.value
+            }
+        }
+        
         val expectedValue = condition.value
+        
+        android.util.Log.d("DynamicFormUiState", "Evaluating condition: field='$fieldId', operator='${condition.operator}', expectedValue='$expectedValue' (type: ${expectedValue?.javaClass?.simpleName}), actualValue='$actualValue' (normalized)")
         
         // Check if this is a multi-select value (comma-separated string)
         // For multi-select dropdowns, value is stored as "VALUE1,VALUE2,VALUE3"
@@ -238,9 +256,10 @@ data class DynamicFormUiState(
             "NOT_EQUALS", "!=" -> {
                 // If field is empty/null, disable dependent field
                 if (actualValue.isBlank()) {
+                    android.util.Log.d("DynamicFormUiState", "NOT_EQUALS: Field '${condition.field}' is blank, returning false")
                     return false
                 }
-                when {
+                val result = when {
                     expectedValue is Boolean -> unwrappedValue != expectedValue
                     expectedValue is String -> {
                         val expectedStr = expectedValue.toString().trim()
@@ -249,17 +268,23 @@ data class DynamicFormUiState(
                             !actualValuesList.any { it.equals(expectedStr, ignoreCase = true) }
                         } else {
                             // For single-select: not equal
-                            !actualValue.equals(expectedStr, ignoreCase = true)
+                            val isNotEqual = !actualValue.equals(expectedStr, ignoreCase = true)
+                            android.util.Log.d("DynamicFormUiState", "NOT_EQUALS: Field '${condition.field}' actualValue='$actualValue', expectedStr='$expectedStr', result=$isNotEqual")
+                            isNotEqual
                         }
                     }
                     else -> {
                         if (isMultiSelectValue) {
                             !actualValuesList.any { it == expectedValue.toString() }
                         } else {
-                            actualValue != expectedValue.toString()
+                            val isNotEqual = actualValue != expectedValue.toString()
+                            android.util.Log.d("DynamicFormUiState", "NOT_EQUALS: Field '${condition.field}' actualValue='$actualValue', expectedValue='${expectedValue.toString()}', result=$isNotEqual")
+                            isNotEqual
                         }
                     }
                 }
+                android.util.Log.d("DynamicFormUiState", "NOT_EQUALS evaluation: Field '${condition.field}' = '$actualValue', NOT_EQUALS '${condition.value}' = $result")
+                result
             }
             "IN" -> {
                 when {

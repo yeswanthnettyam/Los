@@ -78,6 +78,33 @@ class DynamicFormViewModel @Inject constructor(
         }
     }
     
+    /**
+     * Normalize dropdown value: if it's a label from STATIC_JSON field, convert to value.
+     * This ensures we always store/use values, not labels, for consistency.
+     */
+    private fun normalizeDropdownValue(fieldId: String, value: Any?, formScreen: com.kaleidofin.originator.domain.model.FormScreen?): Any? {
+        if (value == null || formScreen == null) return value
+        
+        val valueStr = value.toString().trim()
+        if (valueStr.isBlank()) return value
+        
+        // Find the field definition
+        val field = formScreen.sections.flatMap { it.fields }
+            .plus(formScreen.sections.flatMap { it.subSections.flatMap { sub -> sub.fields } })
+            .find { it.id == fieldId }
+        
+        // If field has staticData and value matches a label, convert to value
+        if (field?.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+            val matchingItem = field.dataSource.staticData.find { it.label == valueStr }
+            if (matchingItem != null) {
+                android.util.Log.d("DynamicFormViewModel", "Normalizing dropdown value: field='$fieldId', label='$valueStr' -> value='${matchingItem.value}'")
+                return matchingItem.value
+            }
+        }
+        
+        return value
+    }
+    
     // Helper method to load screen config from DTO (from Flow API responses)
     // This method processes screenConfig from Flow Engine APIs without making additional API calls
     private suspend fun loadScreenFromDto(
@@ -122,7 +149,9 @@ class DynamicFormViewModel @Inject constructor(
                 // Initialize field value from JSON if present - wrap in { "value": ... }
                     val fieldKey = if (sectionIndex != null) "${field.id}_$sectionIndex" else field.id
                     if (field.value != null) {
-                    initialData[fieldKey] = mapOf("value" to field.value)
+                        // Normalize dropdown value (convert label to value if needed)
+                        val normalizedValue = normalizeDropdownValue(field.id, field.value, formScreen)
+                        initialData[fieldKey] = mapOf("value" to normalizedValue)
                     }
                     
                     field.dataSource?.let { dataSource ->
@@ -183,19 +212,28 @@ class DynamicFormViewModel @Inject constructor(
             }
 
             // If restoreData is provided, use it as the primary source (for back navigation)
-            // Wrap restoreData values if they're not already wrapped
+            // Wrap restoreData values if they're not already wrapped, and normalize dropdown values
             val finalFormData = if (restoreData != null && restoreData.isNotEmpty()) {
                 android.util.Log.d("DynamicFormViewModel", "Restoring form data - ${restoreData.size} fields")
                 val restoredData = mutableMapOf<String, Any>()
                 restoreData.forEach { (key, value) ->
-                    // Check if value is already wrapped, if not wrap it
-                    val wrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
-                        value // Already wrapped
+                    // Extract fieldId from key (handle section indices like "fieldId_0")
+                    val fieldId = key.substringBefore("_").takeIf { key.contains("_") && key.substringAfter("_").all { it.isDigit() } } ?: key
+                    
+                    // Unwrap value if needed
+                    val unwrappedValue = if (value is Map<*, *> && value.containsKey("value")) {
+                        value["value"] // Already wrapped, extract value
                     } else {
-                        mapOf("value" to value) // Wrap it
+                        value // Not wrapped
                     }
+                    
+                    // Normalize dropdown value (convert label to value if needed)
+                    val normalizedValue = normalizeDropdownValue(fieldId, unwrappedValue, formScreen)
+                    
+                    // Wrap normalized value
+                    val wrappedValue = mapOf("value" to normalizedValue)
                     restoredData[key] = wrappedValue
-                    android.util.Log.d("DynamicFormViewModel", "Restored field: $key = $wrappedValue")
+                    android.util.Log.d("DynamicFormViewModel", "Restored field: $key = $wrappedValue (normalized from '$unwrappedValue')")
                 }
                 // Merge with initialData for fields that don't exist in restoreData
                 initialData.forEach { (key, value) ->
@@ -490,7 +528,10 @@ class DynamicFormViewModel @Inject constructor(
         val state = _uiState.value
         val formScreen = state.formScreen
 
-        android.util.Log.d("DynamicFormViewModel", "Updating field: $finalId (base fieldId: $fieldId, sectionIndex: $sectionIndex) with value: '$value'")
+        // Normalize dropdown value (convert label to value if needed) - safeguard in case UI didn't convert
+        val normalizedValue = normalizeDropdownValue(fieldId, value, formScreen)
+
+        android.util.Log.d("DynamicFormViewModel", "Updating field: $finalId (base fieldId: $fieldId, sectionIndex: $sectionIndex) with value: '$value' (normalized: '$normalizedValue')")
 
         // Check if this field has verification - if value changes, reset verification status
         // Find field in sections and subsections recursively (check all subsections, not just first)
@@ -518,7 +559,7 @@ class DynamicFormViewModel @Inject constructor(
         } else {
             oldWrappedValue
         }
-        val valueChanged = oldValue?.toString() != value.toString()
+        val valueChanged = oldValue?.toString() != normalizedValue.toString()
         
         android.util.Log.d("DynamicFormViewModel", "Value changed: $valueChanged (old: '$oldValue', new: '$value')")
         
@@ -532,8 +573,8 @@ class DynamicFormViewModel @Inject constructor(
 
         _uiState.update { currentState ->
             val newFormData = currentState.formData.toMutableMap().apply {
-                // Wrap value in { "value": ... } object
-                put(finalId, mapOf("value" to value))
+                // Wrap normalized value in { "value": ... } object
+                put(finalId, mapOf("value" to normalizedValue))
                 
                 // Reset verification status when field value changes
                 // For VERIFIED_INPUT and API_VERIFICATION fields, reset {finalId}_verified
@@ -1047,14 +1088,26 @@ class DynamicFormViewModel @Inject constructor(
                 }
                 
                 // Unwrap values from { "value": ... } objects before sending to backend
-                val unwrappedFormData = state.formData.filterValues { it != null }.mapValues { entry ->
+                // Also normalize dropdown values (convert labels to values) to ensure consistency
+                val unwrappedFormData = state.formData.filterValues { it != null }.mapNotNull { entry ->
                     val wrapped = entry.value!!
-                    if (wrapped is Map<*, *> && wrapped.containsKey("value")) {
+                    val unwrapped = if (wrapped is Map<*, *> && wrapped.containsKey("value")) {
                         wrapped["value"]!!
                     } else {
                         wrapped
                     }
-                }
+                    
+                    // Extract fieldId from key (handle section indices like "fieldId_0")
+                    val fieldId = entry.key.substringBefore("_").takeIf { 
+                        entry.key.contains("_") && entry.key.substringAfter("_").all { it.isDigit() } 
+                    } ?: entry.key
+                    
+                    // Normalize dropdown value (convert label to value if needed)
+                    val normalizedValue = normalizeDropdownValue(fieldId, unwrapped, screen)
+                    
+                    // Only include non-null values - filter out any nulls from normalization
+                    normalizedValue?.let { entry.key to it }
+                }.toMap()
                 
                 // Update dummy JSON with form data for testing (if needed)
                 formDataSource.updateFormData(screen.screenId, unwrappedFormData)
@@ -1094,8 +1147,8 @@ class DynamicFormViewModel @Inject constructor(
                     
                     // Clear RuntimeSession - flow is complete
                     saveRuntimeSessionToSavedState(null)
-                    
-                    _uiState.update {
+            
+            _uiState.update {
                         it.copy(
                             runtimeSession = null,
                             isSubmitting = false,
@@ -1491,6 +1544,42 @@ class DynamicFormViewModel @Inject constructor(
             } catch (e: Exception) {
                 onFailure(e.message ?: "Failed to verify OTP")
             }
+        }
+    }
+    
+    /* ---------------- CAMERA CAPTURE ---------------- */
+    
+    suspend fun uploadImage(
+        endpoint: String,
+        method: String,
+        imageBytes: ByteArray,
+        mimeType: String
+    ): String? {
+        return try {
+            // TODO: Implement actual image upload using Retrofit/OkHttp
+            // For now, simulate upload and return a mock URL
+            kotlinx.coroutines.delay(1000) // Simulate network delay
+            "https://example.com/images/${java.util.UUID.randomUUID()}.jpg"
+        } catch (e: Exception) {
+            android.util.Log.e("DynamicFormViewModel", "Image upload failed", e)
+            null
+        }
+    }
+    
+    /* ---------------- WEBVIEW LAUNCH ---------------- */
+    
+    suspend fun getWebViewUrl(
+        endpoint: String,
+        method: String
+    ): String? {
+        return try {
+            // TODO: Implement actual API call using Retrofit/OkHttp
+            // For now, simulate API call and return a mock URL
+            kotlinx.coroutines.delay(500) // Simulate network delay
+            "https://example.com/webview"
+        } catch (e: Exception) {
+            android.util.Log.e("DynamicFormViewModel", "WebView URL API call failed", e)
+            null
         }
     }
     

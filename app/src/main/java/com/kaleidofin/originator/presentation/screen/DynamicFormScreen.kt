@@ -227,28 +227,28 @@ fun DynamicFormScreen(
                     ) {
                         // Show back button only if allowBackNavigation is true
                         if (allowBackNavigation) {
-                            IconButton(
-                                onClick = {
-                                viewModel.handleBackNavigation(
+                        IconButton(
+                            onClick = {
+                                    viewModel.handleBackNavigation(
                                     onExitFlow = {
                                         // Exit flow - reset completion flag and navigate back to Home
                                         viewModel.resetFlowCompletion()
-                                        onNavigateBack()
+                                    onNavigateBack()
                                     },
                                         onError = { error ->
                                             coroutineScope.launch {
                                                 snackbarHostState.showSnackbar(error)
-                                            }
+                                }
                                         }
                                     )
-                                },
-                                modifier = Modifier.align(Alignment.CenterStart)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onPrimary
-                                )
+                            },
+                            modifier = Modifier.align(Alignment.CenterStart)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
                             }
                         }
                         Text(
@@ -1015,8 +1015,17 @@ private fun DynamicFormFieldRenderer(
                 options = options,
                 modifier = Modifier.focusRequester(focusRequester),
                 isEnabled = isEnabled,
-                onValueChange = { newValue ->
-                    onValueChange(newValue)
+                onValueChange = { selectedLabel ->
+                    // For STATIC_JSON fields (normalized to INLINE), map label to value
+                    val selectedValue = if (field.dataSource?.staticData != null && field.dataSource.staticData.isNotEmpty()) {
+                        // Find the value corresponding to the selected label
+                        field.dataSource.staticData.find { it.label == selectedLabel }?.value ?: selectedLabel
+                    } else {
+                        // For non-STATIC_JSON fields, use the value as-is
+                        selectedLabel
+                    }
+                    android.util.Log.d("DynamicFormFieldRenderer", "Field: ${field.id}, Selected label: '$selectedLabel', Storing value: '$selectedValue'")
+                    onValueChange(selectedValue)
                 },
                 onBlur = onBlur
             )
@@ -1046,6 +1055,114 @@ private fun DynamicFormFieldRenderer(
                 },
                 onBlur = onBlur
             )
+        }
+        "CAMERA_CAPTURE" -> {
+            val cameraConfig = field.cameraConfig
+            if (cameraConfig != null && cameraConfig.uploadApi != null) {
+                DynamicCameraCaptureField(
+                    field = field,
+                    value = value,
+                    error = error,
+                    modifier = Modifier.focusRequester(focusRequester),
+                    isEnabled = isEnabled,
+                    uploadImage = { imageBytes, mimeType ->
+                        viewModel.uploadImage(
+                            endpoint = cameraConfig.uploadApi.endpoint,
+                            method = cameraConfig.uploadApi.method,
+                            imageBytes = imageBytes,
+                            mimeType = mimeType
+                        )
+                    },
+                    onValueChange = { url ->
+                        onValueChange(url)
+                    },
+                    onBlur = onBlur
+                )
+            }
+        }
+        "WEBVIEW_LAUNCH" -> {
+            val webViewConfig = field.webViewConfig
+            if (webViewConfig != null) {
+                var showWebView by remember { mutableStateOf(false) }
+                var webViewUrl by remember { mutableStateOf<String?>(null) }
+                
+                DynamicWebViewLaunchField(
+                    field = field,
+                    error = error,
+                    modifier = Modifier.focusRequester(focusRequester),
+                    isEnabled = isEnabled,
+                    onLaunchWebView = { url ->
+                        webViewUrl = url
+                        showWebView = true
+                    },
+                    getUrlFromApi = {
+                        if (webViewConfig.launchApi != null) {
+                            viewModel.getWebViewUrl(
+                                endpoint = webViewConfig.launchApi.endpoint,
+                                method = webViewConfig.launchApi.method
+                            )
+                        } else {
+                            null
+                        }
+                    }
+                )
+                
+                // WebView Dialog
+                if (showWebView && webViewUrl != null) {
+                    WebViewDialog(
+                        url = webViewUrl!!,
+                        onDismiss = {
+                            showWebView = false
+                            webViewUrl = null
+                        }
+                    )
+                }
+            }
+        }
+        "QR_SCANNER" -> {
+            val qrConfig = field.qrConfig
+            if (qrConfig != null) {
+                DynamicQRScannerField(
+                    field = field,
+                    error = error,
+                    modifier = Modifier.focusRequester(focusRequester),
+                    isEnabled = isEnabled,
+                    onQRScanned = { prefillData ->
+                        // Prefill target fields with scanned values
+                        prefillData.forEach { (targetFieldId, scannedValue) ->
+                            // Find the target field and its section to determine section index
+                            var targetSectionIndex: Int? = null
+                            
+                            uiState.formScreen?.sections?.forEach { section ->
+                                // Check main section fields
+                                section.fields.find { it.id == targetFieldId }?.let {
+                                    targetSectionIndex = if (section.repeatable) {
+                                        // For repeatable sections, use the first instance (index 0) by default
+                                        // In a real scenario, you might want to determine the correct instance
+                                        0
+                                    } else {
+                                        null
+                                    }
+                                }
+                                
+                                // Check subsection fields
+                                section.subSections.forEach { subSection ->
+                                    subSection.fields.find { it.id == targetFieldId }?.let {
+                                        targetSectionIndex = if (subSection.repeatable) {
+                                            0 // Use first instance by default
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Update the field value
+                            viewModel.updateFieldValue(targetFieldId, scannedValue, targetSectionIndex)
+                        }
+                    }
+                )
+            }
         }
         else -> {
             DynamicFormField(
