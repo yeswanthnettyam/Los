@@ -362,7 +362,7 @@ data class FieldDto(
 }
 
 data class DataSourceDto(
-    @SerializedName("type") val type: String, // "INLINE", "MASTER", "MASTER_DATA", "API", "STATIC_JSON"
+    @SerializedName("type") val type: String? = null, // "INLINE", "MASTER", "MASTER_DATA", "API", "STATIC_JSON"
     @SerializedName("values") val values: List<String>? = null, // For INLINE (legacy)
     @SerializedName("staticData") val staticData: List<StaticDataItemDto>? = null, // For STATIC_JSON
     @SerializedName("key") val key: String? = null, // For MASTER (legacy)

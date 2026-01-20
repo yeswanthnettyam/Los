@@ -126,11 +126,14 @@ fun DateConfigDto.toDomain(): com.kaleidofin.originator.domain.model.DateConfig 
 }
 
 fun DataSourceDto.toDomain(): FieldDataSource {
-    // Normalize type names
-    val normalizedType = when (type.uppercase()) {
-        "STATIC_JSON" -> "INLINE"
-        "MASTER_DATA" -> "MASTER"
-        else -> type
+    // Normalize type names - handle null type gracefully
+    val normalizedType = when {
+        type == null -> "INLINE" // Default to INLINE if type is null
+        else -> when (type.uppercase()) {
+            "STATIC_JSON" -> "INLINE"
+            "MASTER_DATA" -> "MASTER"
+            else -> type
+        }
     }
     
     return FieldDataSource(
