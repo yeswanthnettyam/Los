@@ -59,6 +59,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import android.util.Base64
 import com.kaleidofin.originator.data.dto.AadhaarDecodeResponseDto
+import androidx.camera.core.ImageProxy
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
 fun QRScannerScreen(
@@ -82,7 +84,6 @@ fun QRScannerScreen(
     var torchEnabled by remember { mutableStateOf(false) }
     val lastProcessTime = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     val isQrProcessed = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
-    val lastQrDetectionTime = remember { java.util.concurrent.atomic.AtomicLong(0L) }
     
     // Gallery picker launcher
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -206,30 +207,25 @@ fun QRScannerScreen(
                         it.setSurfaceProvider(previewView.surfaceProvider)
                     }
                     
-                    // High-resolution selector for better QR detection accuracy
-                    // Try highest available resolution (up to 4K) for maximum accuracy like PhonePe/Google Pay
+                    // Higher resolution for Aadhaar QR detection (1080p)
                     val resolutionSelector = ResolutionSelector.Builder()
                         .setResolutionStrategy(
                             ResolutionStrategy(
-                                android.util.Size(2560, 1440), // Target 1440p for best balance of quality and performance
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                android.util.Size(1920, 1080),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER
                             )
                         )
                         .build()
                     
-                    // Use BLOCK_PRODUCER strategy for better quality (like PhonePe/Google Pay)
-                    // This ensures we process every frame with maximum quality, but may be slower
-                    // For faster detection, we'll use KEEP_ONLY_LATEST but with higher resolution
                     val imageAnalysis = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST) // Faster processing
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .setResolutionSelector(resolutionSelector)
-                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888) // Better quality format
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                         .build()
                     
                     imageAnalysisRef = imageAnalysis
-                    // Use multi-threaded executor for faster processing (like PhonePe/Google Pay)
-                    // This allows parallel processing of frames for better performance
-                    val analyzerExecutor = Executors.newFixedThreadPool(2)
+                    // Single-thread executor for sequential frame processing
+                    val analyzerExecutor = Executors.newSingleThreadExecutor()
                     
                     imageAnalysis.setAnalyzer(analyzerExecutor) { imageProxy ->
                         // Prevent processing if scanning is stopped, QR already processed, or API call in progress
@@ -240,15 +236,14 @@ fun QRScannerScreen(
                         
                         val currentTime = System.currentTimeMillis()
                         val lastTime = lastProcessTime.get()
-                        // Reduced throttling from 300ms to 100ms for faster detection (like PhonePe/Google Pay)
-                        if (currentTime - lastTime >= 100) {
+                        // Frame throttling: 60-80ms for Aadhaar QR detection quality
+                        if (currentTime - lastTime >= 70) {
                             lastProcessTime.set(currentTime)
                             processQRImage(
                                 imageProxy = imageProxy,
-                                qrConfig = qrConfig,
                                 context = ctx,
+                                qrConfig = qrConfig,
                                 isQrProcessed = isQrProcessed,
-                                lastQrDetectionTime = lastQrDetectionTime,
                                 onSuccess = { prefillData ->
                                     isScanning = false
                                     imageAnalysis.clearAnalyzer()
@@ -286,14 +281,14 @@ fun QRScannerScreen(
                                                     // API call failed - show error but keep scanning active
                                                     decodeError = error.message ?: "Unable to decode Aadhaar QR"
                                                     // Reset processed flag to allow rescanning after a delay
-                                                    kotlinx.coroutines.delay(500) // Small delay to prevent immediate re-detection
+                                                    kotlinx.coroutines.delay(500)
                                                     isQrProcessed.set(false)
                                                 }
                                             } catch (e: Exception) {
                                                 showDecodeProgress = false
                                                 decodeError = e.message ?: "Unable to decode Aadhaar QR"
                                                 // Reset processed flag to allow rescanning after a delay
-                                                kotlinx.coroutines.delay(500) // Small delay to prevent immediate re-detection
+                                                kotlinx.coroutines.delay(500)
                                                 isQrProcessed.set(false)
                                             }
                                         }
@@ -326,9 +321,8 @@ fun QRScannerScreen(
                         // Store camera instance for torch control
                         cameraRef.value = cameraInstance
                         
-                        // Enable continuous auto-focus for better QR detection (like PhonePe/Google Pay)
-                        // Auto-focus is enabled by default, but we ensure optimal settings
-                        cameraInstance?.cameraControl?.setLinearZoom(0f) // Full zoom range for maximum field of view
+                        // Enable continuous auto-focus for better QR detection
+                        cameraInstance?.cameraControl?.setLinearZoom(0f)
                     } catch (e: Exception) {
                         android.util.Log.e("QRScanner", "Failed to bind camera", e)
                         Toast.makeText(ctx, "Failed to start camera", Toast.LENGTH_LONG).show()
@@ -642,134 +636,83 @@ fun QRScannerScreen(
     }
 }
 
+// Singleton QR scanner instance for better performance
+private val qrScanner by lazy {
+    BarcodeScanning.getClient(
+        BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .build()
+    )
+}
+
 private fun processQRImage(
-    imageProxy: androidx.camera.core.ImageProxy,
-    qrConfig: QRConfig,
+    imageProxy: ImageProxy,
     context: Context,
-    isQrProcessed: java.util.concurrent.atomic.AtomicBoolean,
+    qrConfig: QRConfig,
+    isQrProcessed: AtomicBoolean,
     onSuccess: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null,
-    lastQrDetectionTime: java.util.concurrent.atomic.AtomicLong? = null
+    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null
 ) {
-    if (isQrProcessed.get()) {
+    val mediaImage = imageProxy.image ?: run {
         imageProxy.close()
         return
     }
-    
-    val mediaImage = imageProxy.image
-    if (mediaImage == null) {
-        imageProxy.close()
-        return
-    }
-    
-    val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-    
-    val scannerOptions = BarcodeScannerOptions.Builder()
-        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-        .enableAllPotentialBarcodes()
-        .build()
-    
-    val scanner = BarcodeScanning.getClient(scannerOptions)
-    val inputImage = InputImage.fromMediaImage(mediaImage, rotationDegrees)
-    
-    scanner.process(inputImage)
+
+    val inputImage = InputImage.fromMediaImage(
+        mediaImage,
+        imageProxy.imageInfo.rotationDegrees
+    )
+
+    qrScanner.process(inputImage)
         .addOnSuccessListener { barcodes ->
-            if (isQrProcessed.get()) {
-                imageProxy.close()
+            // Ensure imageProxy.close() is called exactly once
+            imageProxy.close()
+
+            if (isQrProcessed.get()) return@addOnSuccessListener
+            if (barcodes.isEmpty()) return@addOnSuccessListener
+
+            // Aadhaar QR FIRST (binary, large payload)
+            val aadhaarQr = barcodes.firstOrNull {
+                it.rawBytes != null && it.rawBytes!!.size > 1000
+            }
+
+            if (aadhaarQr != null) {
+                isQrProcessed.set(true)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
+                }
+                onAadhaarQRDetected?.invoke(aadhaarQr.rawBytes!!)
                 return@addOnSuccessListener
             }
-            
-            if (barcodes.isNotEmpty()) {
-                // Check for Aadhaar QR
-                var validAadhaarBarcode: Barcode? = null
-                for (barcode in barcodes) {
-                    val rawBytes = barcode.rawBytes
-                    if (barcode.format == Barcode.FORMAT_QR_CODE &&
-                        rawBytes != null &&
-                        rawBytes.size > 1000) {
-                        validAadhaarBarcode = barcode
-                        break
-                    }
-                }
-                
-                if (validAadhaarBarcode != null) {
-                    // Double-check flag to prevent race condition
-                    if (isQrProcessed.get()) {
-                        imageProxy.close()
-                        return@addOnSuccessListener
-                    }
-                    
-                    // Debounce check to prevent duplicate detections
-                    val currentTime = System.currentTimeMillis()
-                    val lastDetectionTime = lastQrDetectionTime?.get() ?: 0L
-                    // Only apply debounce if we've had a previous detection (lastDetectionTime > 0)
-                    if (lastDetectionTime > 0 && currentTime - lastDetectionTime < 2000) {
-                        imageProxy.close()
-                        return@addOnSuccessListener
-                    }
-                    // Update detection time
-                    lastQrDetectionTime?.set(currentTime)
-                    
-                    // Set flag IMMEDIATELY before any callback to prevent duplicate detection
-                    isQrProcessed.set(true)
-                    
-                    val rawBytes = validAadhaarBarcode.rawBytes!!
-                    imageProxy.close()
-                    
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
-                    }
-                    onAadhaarQRDetected?.invoke(rawBytes)
-                    return@addOnSuccessListener
-                }
-                
-                // Standard JSON QR
-                var standardQrBarcode: Barcode? = null
-                for (barcode in barcodes) {
-                    val rawValue = barcode.rawValue
-                    if (rawValue != null && rawValue.isNotBlank()) {
-                        standardQrBarcode = barcode
-                        break
-                    }
-                }
-                
-                if (standardQrBarcode != null) {
-                    val rawValue = standardQrBarcode.rawValue!!
-                    imageProxy.close()
-                    
-                    if (qrConfig.format == "JSON") {
-                        try {
-                            val jsonObject = JSONObject(rawValue)
-                            val prefillData = mutableMapOf<String, String>()
-                            
-                            qrConfig.prefillMapping.forEach { mapping ->
-                                if (jsonObject.has(mapping.qrKey)) {
-                                    var value = jsonObject.optString(mapping.qrKey, "")
-                                    value = value.trim()
-                                    
-                                    if (value.isNotBlank()) {
-                                        prefillData[mapping.targetFieldId] = value
-                                    }
-                                }
+
+            // JSON QR
+            val jsonQr = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }
+                ?: return@addOnSuccessListener
+
+            if (qrConfig.format == "JSON") {
+                try {
+                    val json = JSONObject(jsonQr.rawValue!!)
+                    val result = mutableMapOf<String, String>()
+
+                    qrConfig.prefillMapping.forEach {
+                        if (json.has(it.qrKey)) {
+                            val value = json.optString(it.qrKey).trim()
+                            if (value.isNotEmpty()) {
+                                result[it.targetFieldId] = value
                             }
-                            
-                            if (prefillData.isNotEmpty()) {
-                                isQrProcessed.set(true)
-                                onSuccess(prefillData)
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("QRScanner", "JSON parsing failed", e)
                         }
                     }
-                } else {
-                    imageProxy.close()
+
+                    if (result.isNotEmpty()) {
+                        isQrProcessed.set(true)
+                        onSuccess(result)
+                    }
+                } catch (_: Exception) {
+                    // Silent fail - invalid JSON
                 }
-            } else {
-                imageProxy.close()
             }
         }
-        .addOnFailureListener { e ->
-            android.util.Log.e("QRScanner", "ML Kit scanning failed", e)
+        .addOnFailureListener {
             imageProxy.close()
         }
 }
@@ -788,87 +731,63 @@ private fun processImageFromGallery(
     try {
         val inputImage = InputImage.fromFilePath(context, imageUri)
         
-        val scannerOptions = BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .enableAllPotentialBarcodes()
-            .build()
-        
-        val scanner = BarcodeScanning.getClient(scannerOptions)
-        
-        scanner.process(inputImage)
+        qrScanner.process(inputImage)
             .addOnSuccessListener { barcodes ->
-                if (barcodes.isNotEmpty()) {
-                    // Check for Aadhaar QR
-                    var validAadhaarBarcode: Barcode? = null
-                    for (barcode in barcodes) {
-                        val rawBytes = barcode.rawBytes
-                        if (barcode.format == Barcode.FORMAT_QR_CODE &&
-                            rawBytes != null &&
-                            rawBytes.size > 1000) {
-                            validAadhaarBarcode = barcode
-                            break
-                        }
+                if (barcodes.isEmpty()) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
                     }
-                    
-                    if (validAadhaarBarcode != null) {
-                        val rawBytes = validAadhaarBarcode.rawBytes!!
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
-                        }
-                        onAadhaarQRDetected?.invoke(rawBytes)
-                        return@addOnSuccessListener
+                    return@addOnSuccessListener
+                }
+
+                // 🔥 Aadhaar QR FIRST (binary, large payload)
+                val aadhaarQr = barcodes.firstOrNull {
+                    it.rawBytes != null && it.rawBytes!!.size > 1000
+                }
+
+                if (aadhaarQr != null) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
                     }
-                    
-                    // Standard JSON QR
-                    var standardQrBarcode: Barcode? = null
-                    for (barcode in barcodes) {
-                        val rawValue = barcode.rawValue
-                        if (rawValue != null && rawValue.isNotBlank()) {
-                            standardQrBarcode = barcode
-                            break
-                        }
+                    onAadhaarQRDetected?.invoke(aadhaarQr.rawBytes!!)
+                    return@addOnSuccessListener
+                }
+
+                // JSON QR
+                val jsonQr = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }
+                
+                if (jsonQr == null) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
                     }
-                    
-                    if (standardQrBarcode != null) {
-                        val rawValue = standardQrBarcode.rawValue!!
-                        
-                        if (qrConfig.format == "JSON") {
-                            try {
-                                val jsonObject = JSONObject(rawValue)
-                                val prefillData = mutableMapOf<String, String>()
-                                
-                                qrConfig.prefillMapping.forEach { mapping ->
-                                    if (jsonObject.has(mapping.qrKey)) {
-                                        var value = jsonObject.optString(mapping.qrKey, "")
-                                        value = value.trim()
-                                        
-                                        if (value.isNotBlank()) {
-                                            prefillData[mapping.targetFieldId] = value
-                                        }
-                                    }
-                                }
-                                
-                                if (prefillData.isNotEmpty()) {
-                                    onSuccess(prefillData)
-                                } else {
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                    Toast.makeText(context, "Failed to parse QR code", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+
+                if (qrConfig.format == "JSON") {
+                    try {
+                        val json = JSONObject(jsonQr.rawValue!!)
+                        val result = mutableMapOf<String, String>()
+
+                        qrConfig.prefillMapping.forEach {
+                            if (json.has(it.qrKey)) {
+                                val value = json.optString(it.qrKey).trim()
+                                if (value.isNotEmpty()) {
+                                    result[it.targetFieldId] = value
                                 }
                             }
                         }
-                    } else {
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
+
+                        if (result.isNotEmpty()) {
+                            onSuccess(result)
+                        } else {
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
+                            }
                         }
-                    }
-                } else {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        Toast.makeText(context, "No QR code found in image", Toast.LENGTH_LONG).show()
+                    } catch (_: Exception) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            Toast.makeText(context, "Failed to parse QR code", Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
             }

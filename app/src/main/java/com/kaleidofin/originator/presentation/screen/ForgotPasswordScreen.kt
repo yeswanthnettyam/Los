@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kaleidofin.originator.presentation.component.PrimaryButton
 import com.kaleidofin.originator.presentation.viewmodel.ForgotPasswordViewModel
@@ -125,8 +126,11 @@ private fun FormView(
     // Instructional text
     Text(
         text = "Please enter the registered email to receive the Username and Password",
-        style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface,
+        fontWeight = FontWeight.Medium,
+        style = MaterialTheme.typography.bodyMedium.copy(
+            fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value + 6).sp
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 24.dp)
