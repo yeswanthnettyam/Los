@@ -1,6 +1,8 @@
 package com.kaleidofin.originator.data.dto
 
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import com.google.gson.annotations.SerializedName
 
 data class FormScreenDto(
@@ -216,8 +218,10 @@ data class FieldDto(
     @SerializedName("maxSelections") val maxSelections: Int? = null,
     // New field type configs
     @SerializedName("cameraConfig") val cameraConfig: CameraConfigDto? = null,
-    @SerializedName("webViewConfig") val webViewConfig: WebViewConfigDto? = null,
-    @SerializedName("qrConfig") val qrConfig: QRConfigDto? = null
+    @SerializedName(value = "webViewConfig", alternate = ["webviewConfig"]) val webViewConfig: WebViewConfigDto? = null,
+    @SerializedName("qrConfig") val qrConfig: QRConfigDto? = null,
+    // Storage configuration (sibling of cameraConfig, not inside it)
+    @SerializedName("storage") val storage: CameraStorageDto? = null
 ) {
     // Helper to convert maxLength to Int
     val maxLengthInt: Int?
@@ -638,11 +642,32 @@ data class BackNavigationResponseDto(
 
 // Camera Config DTOs
 data class CameraConfigDto(
-    @SerializedName("cameraType") val cameraType: String? = "BACK",
+    @SerializedName("cameraType") val cameraType: String? = null,
+    @SerializedName("cameraFacing") val cameraFacing: String? = null, // Alternative field name
     @SerializedName("minWidth") val minWidth: Int? = null,
     @SerializedName("minHeight") val minHeight: Int? = null,
-    @SerializedName("enableBlurDetection") val enableBlurDetection: Boolean? = true,
-    @SerializedName("uploadApi") val uploadApi: CameraUploadApiDto?
+    @SerializedName("enableBlurDetection") val enableBlurDetection: Boolean? = null,
+    @SerializedName("uploadApi") val uploadApi: CameraUploadApiDto? = null,
+    @SerializedName("qualityChecks") val qualityChecks: CameraQualityChecksDto? = null,
+    @SerializedName("storage") val storage: CameraStorageDto? = null,
+    @SerializedName("minImages") val minImages: String? = null,
+    @SerializedName("maxImages") val maxImages: String? = null
+)
+
+data class CameraQualityChecksDto(
+    @SerializedName("blurDetection") val blurDetection: Boolean? = null,
+    @SerializedName("minResolution") val minResolution: CameraResolutionDto? = null
+)
+
+data class CameraResolutionDto(
+    @SerializedName("width") val width: String? = null,
+    @SerializedName("height") val height: String? = null
+)
+
+data class CameraStorageDto(
+    @SerializedName("uploadOnCapture") val uploadOnCapture: Boolean? = null,
+    @SerializedName("uploadApi") val uploadApi: String? = null, // Can be a string endpoint
+    @SerializedName("fileType") val fileType: String? = null
 )
 
 data class CameraUploadApiDto(
@@ -652,10 +677,45 @@ data class CameraUploadApiDto(
 
 // WebView Config DTOs
 data class WebViewConfigDto(
-    @SerializedName("urlSource") val urlSource: String, // "STATIC" | "API"
+    @SerializedName("urlSource") val urlSource: String? = null, // "STATIC" | "API"
     @SerializedName("staticUrl") val staticUrl: String? = null,
-    @SerializedName("launchApi") val launchApi: WebViewLaunchApiDto? = null
-)
+    @SerializedName("url") val url: String? = null, // Alternative field name for staticUrl
+    @SerializedName("launchApi") private val launchApiElement: JsonElement? = null, // Can be string or object (legacy)
+    @SerializedName("backendEndpoint") val backendEndpoint: String? = null, // New format: endpoint as string
+    @SerializedName("method") val method: String? = null, // HTTP method
+    @SerializedName("responseUrlField") val responseUrlField: String? = null // Field name in response that contains URL (default: "url")
+) {
+    // Parse launchApi - handle multiple formats:
+    // 1. backendEndpoint (new format): { "backendEndpoint": "/api/v1/esign/launch", "method": "POST" }
+    // 2. launchApi as string (legacy): { "launchApi": "/api/v1/esign/init", "method": "POST" }
+    // 3. launchApi as object (legacy): { "launchApi": { "endpoint": "...", "method": "..." } }
+    val launchApi: WebViewLaunchApiDto?
+        get() = when {
+            // New format: backendEndpoint
+            !backendEndpoint.isNullOrBlank() -> {
+                WebViewLaunchApiDto(
+                    endpoint = backendEndpoint,
+                    method = method ?: "POST"
+                )
+            }
+            // Legacy format: launchApi as string
+            launchApiElement != null && launchApiElement.isJsonPrimitive && launchApiElement.asJsonPrimitive.isString -> {
+                WebViewLaunchApiDto(
+                    endpoint = launchApiElement.asString,
+                    method = method ?: "POST"
+                )
+            }
+            // Legacy format: launchApi as object
+            launchApiElement != null && launchApiElement.isJsonObject -> {
+                val obj = launchApiElement.asJsonObject
+                WebViewLaunchApiDto(
+                    endpoint = obj.get("endpoint")?.asString ?: "",
+                    method = obj.get("method")?.asString ?: "POST"
+                )
+            }
+            else -> null
+        }
+}
 
 data class WebViewLaunchApiDto(
     @SerializedName("endpoint") val endpoint: String,

@@ -25,7 +25,7 @@ object ApiConfig {
      * 
      * For production: use your actual backend URL
      */
-    const val BASE_URL = "http://10.0.2.2:8080/"
+    const val BASE_URL = "http://192.168.1.16:8080/"
     
     /**
      * Enable/disable API logging

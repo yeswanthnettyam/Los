@@ -1491,6 +1491,22 @@ class FormApiServiceDummy @Inject constructor(
         )
     }
     
+    /**
+     * Aadhaar QR Decode API - Dummy implementation for testing
+     * POST /api/v1/qr/aadhaar/decode
+     */
+    override suspend fun decodeAadhaarQR(request: AadhaarDecodeRequestDto): AadhaarDecodeResponseDto {
+        delay(1000) // Simulate network delay
+        
+        // Dummy response for testing
+        return AadhaarDecodeResponseDto(
+            name = "John Doe",
+            gender = "M",
+            dob = "1990-01-01",
+            aadhaarLast4 = "1234"
+        )
+    }
+    
     // Legacy APIs removed - Only swagger APIs are used now
     // All navigation must use nextScreen() which calls POST /api/v1/runtime/next-screen
 }

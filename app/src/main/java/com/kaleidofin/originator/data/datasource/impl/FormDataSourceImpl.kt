@@ -55,6 +55,16 @@ class FormDataSourceImpl @Inject constructor(
         return formApiService.getAllMasterData()
     }
     
+    override suspend fun decodeAadhaarQR(qrDataBase64: String): Result<AadhaarDecodeResponseDto> {
+        return try {
+            val request = AadhaarDecodeRequestDto(qrPayloadBase64 = qrDataBase64)
+            val response = formApiService.decodeAadhaarQR(request)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
     override fun updateFormData(screenId: String, formData: Map<String, Any>) {
         // Cast to FormApiServiceDummy for testing - only works with dummy implementation
         if (formApiService is com.kaleidofin.originator.data.api.FormApiServiceDummy) {

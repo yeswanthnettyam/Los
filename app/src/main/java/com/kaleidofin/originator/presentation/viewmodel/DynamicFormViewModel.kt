@@ -17,6 +17,12 @@ import javax.inject.Inject
 import com.kaleidofin.originator.data.datasource.FormDataSource
 import com.kaleidofin.originator.data.mapper.toDomain
 import com.google.gson.Gson
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import com.kaleidofin.originator.util.ApiConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // FlowStep data class removed - navigation is now backend-driven
 // Keeping for potential future use if needed, but flow stack management is removed
@@ -35,7 +41,8 @@ data class NavigationStackEntry(
 class DynamicFormViewModel @Inject constructor(
     private val getMasterDataUseCase: GetMasterDataUseCase,
     private val formDataSource: FormDataSource,
-    private val savedStateHandle: SavedStateHandle
+    private val savedStateHandle: SavedStateHandle,
+    private val okHttpClient: OkHttpClient
 ) : ViewModel() {
 
     // Local navigation stack for back navigation
@@ -1554,32 +1561,166 @@ class DynamicFormViewModel @Inject constructor(
         method: String,
         imageBytes: ByteArray,
         mimeType: String
-    ): String? {
-        return try {
-            // TODO: Implement actual image upload using Retrofit/OkHttp
-            // For now, simulate upload and return a mock URL
-            kotlinx.coroutines.delay(1000) // Simulate network delay
-            "https://example.com/images/${java.util.UUID.randomUUID()}.jpg"
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            android.util.Log.d("DynamicFormViewModel", "Uploading image to: $endpoint, method: $method, size: ${imageBytes.size} bytes")
+            
+            // Build full URL (endpoint might be absolute or relative)
+            val fullUrl = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+                endpoint
+        } else {
+                // Remove leading slash if present and combine with base URL
+                val cleanEndpoint = endpoint.removePrefix("/")
+                "${ApiConfig.BASE_URL.removeSuffix("/")}/$cleanEndpoint"
+            }
+            
+            android.util.Log.d("DynamicFormViewModel", "Full upload URL: $fullUrl")
+            
+            // Create multipart request body
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    "image.jpg",
+                    imageBytes.toRequestBody(mimeType.toMediaType())
+                )
+                .build()
+            
+            // Build request
+            val requestBuilder = Request.Builder()
+                .url(fullUrl)
+                .post(requestBody)
+            
+            // Execute request on IO thread (already in withContext(Dispatchers.IO))
+            val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            
+            android.util.Log.d("DynamicFormViewModel", "Upload response code: ${response.code}")
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                android.util.Log.d("DynamicFormViewModel", "Upload response: $responseBody")
+                
+                // Parse response - expect JSON with fileId or url field
+                // Common response formats:
+                // {"fileId": "abc123"} or {"url": "https://..."} or {"data": {"fileId": "abc123"}}
+                try {
+                    val json = Gson().fromJson(responseBody, Map::class.java) as? Map<*, *>
+                    val fileId = json?.get("fileId") as? String
+                        ?: json?.get("url") as? String
+                        ?: (json?.get("data") as? Map<*, *>)?.get("fileId") as? String
+                        ?: (json?.get("data") as? Map<*, *>)?.get("url") as? String
+                        ?: responseBody // Fallback to raw response
+                    
+                    android.util.Log.d("DynamicFormViewModel", "Upload successful, fileId: $fileId")
+                    fileId?.toString()
+                } catch (e: Exception) {
+                    android.util.Log.e("DynamicFormViewModel", "Failed to parse upload response", e)
+                    // If response is not JSON, treat entire response as fileId/URL
+                    responseBody
+                }
+            } else {
+                val errorBody = response.body?.string()
+                android.util.Log.e("DynamicFormViewModel", "Upload failed: ${response.code}, $errorBody")
+                throw Exception("Upload failed: ${response.code} - $errorBody")
+            }
         } catch (e: Exception) {
-            android.util.Log.e("DynamicFormViewModel", "Image upload failed", e)
+            android.util.Log.e("DynamicFormViewModel", "Image upload error", e)
             null
         }
     }
-    
+
     /* ---------------- WEBVIEW LAUNCH ---------------- */
     
     suspend fun getWebViewUrl(
         endpoint: String,
-        method: String
-    ): String? {
-        return try {
-            // TODO: Implement actual API call using Retrofit/OkHttp
-            // For now, simulate API call and return a mock URL
-            kotlinx.coroutines.delay(500) // Simulate network delay
-            "https://example.com/webview"
+        method: String,
+        responseUrlField: String? = null // Field name in response that contains URL (default: "url")
+    ): String? = withContext(Dispatchers.IO) {
+        // Fallback URL for testing purposes
+        val fallbackUrl = "https://www.kaleidofin.com/"
+        
+        try {
+            android.util.Log.d("DynamicFormViewModel", "Getting WebView URL from: $endpoint, method: $method")
+            
+            // Build full URL (endpoint might be absolute or relative)
+            val fullUrl = if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+                endpoint
+            } else {
+                // Remove leading slash if present and combine with base URL
+                val cleanEndpoint = endpoint.removePrefix("/")
+                "${ApiConfig.BASE_URL.removeSuffix("/")}/$cleanEndpoint"
+            }
+            
+            android.util.Log.d("DynamicFormViewModel", "Full WebView URL API: $fullUrl")
+            
+            // Get current form data for the request body
+            val currentState = _uiState.value
+            val formData = currentState.formData ?: emptyMap()
+            
+            // Build request body (JSON)
+            val requestBody = gson.toJson(formData).toRequestBody("application/json".toMediaType())
+            
+            // Build request
+            val requestBuilder = when (method.uppercase()) {
+                "POST" -> Request.Builder().url(fullUrl).post(requestBody)
+                "GET" -> Request.Builder().url(fullUrl).get()
+                else -> Request.Builder().url(fullUrl).post(requestBody) // Default to POST
+            }
+            
+            // Execute request
+            val response = okHttpClient.newCall(requestBuilder.build()).execute()
+            
+            android.util.Log.d("DynamicFormViewModel", "WebView URL API response code: ${response.code}")
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body?.string()
+                android.util.Log.d("DynamicFormViewModel", "WebView URL API response: $responseBody")
+                
+                // Parse response - expect JSON with url field
+                // Use responseUrlField if provided, otherwise default to "url"
+                // Common response formats:
+                // {"url": "https://..."} or {"data": {"url": "https://..."}} or just a string URL
+                val urlFieldName = responseUrlField ?: "url"
+                try {
+                    val json = gson.fromJson(responseBody, Map::class.java) as? Map<*, *>
+                    val url = json?.get(urlFieldName) as? String
+                        ?: (json?.get("data") as? Map<*, *>)?.get(urlFieldName) as? String
+                        ?: json?.get("url") as? String // Fallback to "url" if responseUrlField not found
+                        ?: (json?.get("data") as? Map<*, *>)?.get("url") as? String // Fallback to "data.url"
+                        ?: responseBody?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                        ?: responseBody?.trim()?.takeIf { it.isNotBlank() }
+                    
+                    if (url != null && url.isNotBlank()) {
+                        android.util.Log.d("DynamicFormViewModel", "WebView URL extracted: $url")
+                        url
+        } else {
+                        android.util.Log.w("DynamicFormViewModel", "No URL found in response: $responseBody, using fallback URL")
+                        fallbackUrl
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("DynamicFormViewModel", "Failed to parse WebView URL response", e)
+                    // If response is not JSON, treat entire response as URL if it looks like one
+                    val url = responseBody?.takeIf { 
+                        it.startsWith("http://") || it.startsWith("https://") 
+                    }?.trim()
+                    
+                    if (url != null && url.isNotBlank()) {
+                        url
+                    } else {
+                        android.util.Log.w("DynamicFormViewModel", "Response is not a valid URL, using fallback URL")
+                        fallbackUrl
+                    }
+                }
+            } else {
+                val errorBody = response.body?.string()
+                android.util.Log.w("DynamicFormViewModel", "WebView URL API failed: ${response.code}, $errorBody. Using fallback URL for testing.")
+                // Return fallback URL instead of throwing exception
+                fallbackUrl
+            }
         } catch (e: Exception) {
-            android.util.Log.e("DynamicFormViewModel", "WebView URL API call failed", e)
-            null
+            android.util.Log.w("DynamicFormViewModel", "WebView URL API call error: ${e.message}. Using fallback URL for testing.", e)
+            // Return fallback URL instead of null for testing purposes
+            fallbackUrl
         }
     }
     
@@ -1659,6 +1800,30 @@ class DynamicFormViewModel @Inject constructor(
             val newErrors = state.fieldErrors.toMutableMap()
             newErrors.remove(fieldKey)
             state.copy(fieldErrors = newErrors)
+        }
+    }
+    
+    /**
+     * Decode Aadhaar QR using backend API
+     * 
+     * @param qrDataBase64 Base64-encoded QR payload (NO_WRAP)
+     * @return Result containing decoded Aadhaar data or error
+     */
+    suspend fun decodeAadhaarQR(qrDataBase64: String): Result<com.kaleidofin.originator.data.dto.AadhaarDecodeResponseDto> {
+        return try {
+            android.util.Log.d("DynamicFormViewModel", "Sending Aadhaar QR payload, base64 length = ${qrDataBase64.length}")
+            val result = formDataSource.decodeAadhaarQR(qrDataBase64)
+            
+            result.onSuccess { response ->
+                android.util.Log.d("DynamicFormViewModel", "Aadhaar decode API success: name=${response.name != null}, gender=${response.gender != null}, dob=${response.dob != null}, aadhaarLast4=${response.aadhaarLast4 != null}")
+            }.onFailure { error ->
+                android.util.Log.e("DynamicFormViewModel", "Aadhaar decode API failed: ${error.message}", error)
+            }
+            
+            result
+        } catch (e: Exception) {
+            android.util.Log.e("DynamicFormViewModel", "Aadhaar decode API exception: ${e.message}", e)
+            Result.failure(e)
         }
     }
 }

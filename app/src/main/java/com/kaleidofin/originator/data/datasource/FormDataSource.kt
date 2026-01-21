@@ -40,6 +40,15 @@ interface FormDataSource {
      */
     suspend fun getAllMasterData(): Map<String, List<String>>
     
+    /**
+     * Aadhaar QR Decode API
+     * POST /api/v1/qr/aadhaar/decode
+     * 
+     * Decodes UIDAI Secure QR binary payload
+     * Frontend sends Base64-encoded rawBytes, backend returns decoded data
+     */
+    suspend fun decodeAadhaarQR(qrDataBase64: String): Result<AadhaarDecodeResponseDto>
+    
     fun updateFormData(screenId: String, formData: Map<String, Any>) // For testing: Update dummy JSON
     
     // Legacy APIs removed - Only swagger APIs are used now

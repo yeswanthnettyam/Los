@@ -81,6 +81,16 @@ fun ValidationRuleDto.toDomain(): ValidationRule {
 }
 
 fun FieldDto.toDomain(): FormField {
+    // Handle storage.uploadApi - merge field-level storage with cameraConfig.storage
+    // Field-level storage takes precedence if both exist
+    val cameraConfigDomain = cameraConfig?.let { configDto ->
+        // Merge storage: field-level storage takes precedence over cameraConfig.storage
+        val mergedStorage = storage ?: configDto.storage
+        // Create a new CameraConfigDto with merged storage
+        val mergedConfigDto = configDto.copy(storage = mergedStorage)
+        mergedConfigDto.toDomain()
+    }
+    
     return FormField(
         id = id,
         type = type,
@@ -109,7 +119,7 @@ fun FieldDto.toDomain(): FormField {
         selectionMode = selectionMode,
         minSelections = minSelections,
         maxSelections = maxSelections,
-        cameraConfig = cameraConfig?.toDomain(),
+        cameraConfig = cameraConfigDomain,
         webViewConfig = webViewConfig?.toDomain(),
         qrConfig = qrConfig?.toDomain()
     )
@@ -368,12 +378,56 @@ fun FormValidationRuleDto.toDomain(): com.kaleidofin.originator.domain.model.For
 }
 
 fun CameraConfigDto.toDomain(): com.kaleidofin.originator.domain.model.CameraConfig {
+    // Handle both old and new JSON structures
+    val resolvedCameraType = cameraType ?: cameraFacing ?: "BACK"
+    
+    // Extract from qualityChecks if present
+    val resolvedMinWidth = minWidth ?: qualityChecks?.minResolution?.width?.toIntOrNull()
+    val resolvedMinHeight = minHeight ?: qualityChecks?.minResolution?.height?.toIntOrNull()
+    val resolvedBlurDetection = enableBlurDetection ?: qualityChecks?.blurDetection ?: true
+    
+    // Debug logging
+    android.util.Log.d("CameraConfigMapper", "=== CameraConfigDto.toDomain() ===")
+    android.util.Log.d("CameraConfigMapper", "uploadApi (object): $uploadApi")
+    android.util.Log.d("CameraConfigMapper", "storage: $storage")
+    android.util.Log.d("CameraConfigMapper", "storage?.uploadOnCapture: ${storage?.uploadOnCapture}")
+    android.util.Log.d("CameraConfigMapper", "storage?.uploadApi: ${storage?.uploadApi}")
+    
+    // Only set uploadApi if storage.uploadOnCapture is true or uploadApi is explicitly provided
+    // Handle both cameraConfig.uploadApi (object) and storage.uploadApi (string)
+    val resolvedUploadApi = when {
+        uploadApi != null -> {
+            android.util.Log.d("CameraConfigMapper", "Using cameraConfig.uploadApi (object)")
+            uploadApi.toDomain() // cameraConfig.uploadApi (object)
+        }
+        storage?.uploadOnCapture == true && storage.uploadApi != null -> {
+            android.util.Log.d("CameraConfigMapper", "Converting storage.uploadApi (string) to CameraUploadApi: ${storage.uploadApi}")
+            // storage.uploadApi is a string, convert to CameraUploadApi object
+            com.kaleidofin.originator.domain.model.CameraUploadApi(
+                endpoint = storage.uploadApi,
+                method = "POST"
+            )
+        }
+        else -> {
+            android.util.Log.d("CameraConfigMapper", "No uploadApi found - returning null")
+            null
+        }
+    }
+    
+    android.util.Log.d("CameraConfigMapper", "resolvedUploadApi: $resolvedUploadApi")
+    
+    // Parse minImages and maxImages from String to Int
+    val resolvedMinImages = minImages?.toIntOrNull()
+    val resolvedMaxImages = maxImages?.toIntOrNull()
+    
     return com.kaleidofin.originator.domain.model.CameraConfig(
-        cameraType = cameraType ?: "BACK",
-        minWidth = minWidth,
-        minHeight = minHeight,
-        enableBlurDetection = enableBlurDetection ?: true,
-        uploadApi = uploadApi?.toDomain()
+        cameraType = resolvedCameraType,
+        minWidth = resolvedMinWidth,
+        minHeight = resolvedMinHeight,
+        enableBlurDetection = resolvedBlurDetection,
+        uploadApi = resolvedUploadApi,
+        minImages = resolvedMinImages,
+        maxImages = resolvedMaxImages
     )
 }
 
@@ -385,10 +439,16 @@ fun CameraUploadApiDto.toDomain(): com.kaleidofin.originator.domain.model.Camera
 }
 
 fun WebViewConfigDto.toDomain(): com.kaleidofin.originator.domain.model.WebViewConfig {
+    // Handle both "staticUrl" and "url" field names
+    val resolvedStaticUrl = staticUrl ?: url
+    // If urlSource is not provided but url/staticUrl is, assume STATIC
+    val resolvedUrlSource = urlSource ?: (if (resolvedStaticUrl != null) "STATIC" else null)
+    
     return com.kaleidofin.originator.domain.model.WebViewConfig(
-        urlSource = urlSource,
-        staticUrl = staticUrl,
-        launchApi = launchApi?.toDomain()
+        urlSource = resolvedUrlSource ?: "STATIC",
+        staticUrl = resolvedStaticUrl,
+        launchApi = launchApi?.toDomain(),
+        responseUrlField = responseUrlField // Pass responseUrlField to domain model
     )
 }
 

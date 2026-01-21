@@ -291,7 +291,9 @@ data class CameraConfig(
     val minWidth: Int? = null,
     val minHeight: Int? = null,
     val enableBlurDetection: Boolean = true,
-    val uploadApi: CameraUploadApi?
+    val uploadApi: CameraUploadApi? = null, // Optional - if null, image stored locally
+    val minImages: Int? = null, // Minimum number of images required
+    val maxImages: Int? = null // Maximum number of images allowed
 )
 
 data class CameraUploadApi(
@@ -303,7 +305,8 @@ data class CameraUploadApi(
 data class WebViewConfig(
     val urlSource: String, // "STATIC" | "API"
     val staticUrl: String? = null, // Required if urlSource = "STATIC"
-    val launchApi: WebViewLaunchApi? = null // Required if urlSource = "API"
+    val launchApi: WebViewLaunchApi? = null, // Required if urlSource = "API"
+    val responseUrlField: String? = null // Field name in API response that contains URL (default: "url")
 )
 
 data class WebViewLaunchApi(

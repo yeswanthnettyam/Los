@@ -1,0 +1,29 @@
+package com.kaleidofin.originator.data.dto
+
+import com.google.gson.annotations.SerializedName
+
+/**
+ * Request DTO for Aadhaar QR decode API
+ * POST /api/v1/qr/aadhaar/decode
+ */
+data class AadhaarDecodeRequestDto(
+    @SerializedName("qrPayloadBase64")
+    val qrPayloadBase64: String // Base64-encoded QR payload (NO_WRAP)
+)
+
+/**
+ * Response DTO for Aadhaar QR decode API
+ */
+data class AadhaarDecodeResponseDto(
+    @SerializedName("name")
+    val name: String?,
+    
+    @SerializedName("gender")
+    val gender: String?,
+    
+    @SerializedName("dob")
+    val dob: String?,
+    
+    @SerializedName("aadhaarLast4")
+    val aadhaarLast4: String?
+)

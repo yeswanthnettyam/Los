@@ -29,9 +29,15 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
+import android.widget.Toast
+import android.util.Base64
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import com.kaleidofin.originator.domain.model.FormField
 import com.kaleidofin.originator.domain.model.FormSection
 import com.kaleidofin.originator.presentation.component.*
+import com.kaleidofin.originator.presentation.navigation.Screen
 import com.kaleidofin.originator.presentation.ui.state.DynamicFormUiState
 import com.kaleidofin.originator.presentation.viewmodel.DynamicFormViewModel
 
@@ -47,6 +53,7 @@ fun DynamicFormScreen(
     productCode: String? = null,
     partnerCode: String? = null,
     branchCode: String? = null,
+    navController: NavController,
     onNavigateBack: () -> Unit,
     viewModel: DynamicFormViewModel = hiltViewModel()
 ) {
@@ -54,6 +61,12 @@ fun DynamicFormScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    
+    // State for Aadhaar QR decoding
+    var isDecodingAadhaar by remember { mutableStateOf(false) }
+    var showAadhaarDecodeProgressDialog by remember { mutableStateOf(false) }
+    var aadhaarDecodeError by remember { mutableStateOf<String?>(null) }
 
     // 🔑 Focus management
     val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -318,6 +331,13 @@ fun DynamicFormScreen(
                                     sectionIndex = if (section.repeatable) index else null,
                                     focusRequesters = focusRequesters,
                                     viewModel = viewModel,
+                                    navController = navController,
+                                    isDecodingAadhaar = isDecodingAadhaar,
+                                    coroutineScope = coroutineScope,
+                                    context = context,
+                                    onSetDecodingAadhaar = { value -> isDecodingAadhaar = value },
+                                    onShowAadhaarDecodeProgressDialog = { value -> showAadhaarDecodeProgressDialog = value },
+                                    onSetAadhaarDecodeError = { error -> aadhaarDecodeError = error },
                                     onValueChange = { fieldId, value ->
                                         val actualIndex = if (section.repeatable) index else null
                                         viewModel.updateFieldValue(fieldId, value, actualIndex)
@@ -650,6 +670,56 @@ fun DynamicFormScreen(
                         }
                     )
                 }
+                
+                // Aadhaar QR Decode Progress Dialog
+                if (showAadhaarDecodeProgressDialog) {
+                    Dialog(onDismissRequest = { /* Prevent dismiss during API call */ }) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                CircularProgressIndicator()
+                                Text(
+                                    text = "Reading Aadhaar QR…",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Aadhaar QR Decode Error Dialog
+                aadhaarDecodeError?.let { errorMessage ->
+                    AlertDialog(
+                        onDismissRequest = {
+                            aadhaarDecodeError = null
+                        },
+                        title = {
+                            Text("Error")
+                        },
+                        text = {
+                            Text(errorMessage)
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    aadhaarDecodeError = null
+                                }
+                            ) {
+                                Text("OK")
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -664,6 +734,13 @@ private fun FormSection(
     sectionIndex: Int?,
     focusRequesters: MutableMap<String, FocusRequester>,
     viewModel: DynamicFormViewModel,
+    navController: NavController,
+    isDecodingAadhaar: Boolean,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context,
+    onSetDecodingAadhaar: (Boolean) -> Unit,
+    onShowAadhaarDecodeProgressDialog: (Boolean) -> Unit,
+    onSetAadhaarDecodeError: (String?) -> Unit,
     onValueChange: (String, Any) -> Unit,
     onBlur: (String) -> Unit,
     onTriggerVerification: (String, Any) -> Unit = { _, _ -> }, // New callback for verification
@@ -801,7 +878,14 @@ private fun FormSection(
                     focusRequesters = focusRequesters,
                     uiState = uiState,
                     viewModel = viewModel,
+                    navController = navController,
                     isEnabled = isFieldEnabled,
+                    isDecodingAadhaar = isDecodingAadhaar,
+                    coroutineScope = coroutineScope,
+                    context = context,
+                    onSetDecodingAadhaar = onSetDecodingAadhaar,
+                    onShowAadhaarDecodeProgressDialog = onShowAadhaarDecodeProgressDialog,
+                    onSetAadhaarDecodeError = onSetAadhaarDecodeError,
                     onValueChange = { newValue -> 
                         // Convert Any to String if needed, then pass to parent
                         val stringValue = when (newValue) {
@@ -838,6 +922,13 @@ private fun FormSection(
                             sectionIndex = if (subSection.repeatable) subIndex else null,
                             focusRequesters = focusRequesters,
                             viewModel = viewModel,
+                            navController = navController,
+                            isDecodingAadhaar = isDecodingAadhaar,
+                            coroutineScope = coroutineScope,
+                            context = context,
+                            onSetDecodingAadhaar = onSetDecodingAadhaar,
+                            onShowAadhaarDecodeProgressDialog = onShowAadhaarDecodeProgressDialog,
+                            onSetAadhaarDecodeError = onSetAadhaarDecodeError,
                             onValueChange = { fieldId, value ->
                                 val actualIndex = if (subSection.repeatable) subIndex else null
                                 viewModel.updateFieldValue(fieldId, value, actualIndex)
@@ -885,8 +976,15 @@ private fun DynamicFormFieldRenderer(
     fieldKey: String,
     focusRequesters: MutableMap<String, FocusRequester>,
     uiState: DynamicFormUiState,
-    viewModel: DynamicFormViewModel, // Add viewModel parameter
+    viewModel: DynamicFormViewModel,
+    navController: NavController,
     isEnabled: Boolean = true,
+    isDecodingAadhaar: Boolean = false,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context,
+    onSetDecodingAadhaar: (Boolean) -> Unit,
+    onShowAadhaarDecodeProgressDialog: (Boolean) -> Unit,
+    onSetAadhaarDecodeError: (String?) -> Unit,
     onValueChange: (Any) -> Unit,
     onBlur: () -> Unit,
     onDateClick: (String, com.kaleidofin.originator.domain.model.FormField) -> Unit = { _, _ -> },
@@ -1058,21 +1156,27 @@ private fun DynamicFormFieldRenderer(
         }
         "CAMERA_CAPTURE" -> {
             val cameraConfig = field.cameraConfig
-            if (cameraConfig != null && cameraConfig.uploadApi != null) {
+            if (cameraConfig != null) {
                 DynamicCameraCaptureField(
                     field = field,
                     value = value,
                     error = error,
                     modifier = Modifier.focusRequester(focusRequester),
                     isEnabled = isEnabled,
-                    uploadImage = { imageBytes, mimeType ->
-                        viewModel.uploadImage(
-                            endpoint = cameraConfig.uploadApi.endpoint,
-                            method = cameraConfig.uploadApi.method,
-                            imageBytes = imageBytes,
-                            mimeType = mimeType
-                        )
+                    uploadImage = if (cameraConfig.uploadApi != null) {
+                        { imageBytes, mimeType ->
+                            viewModel.uploadImage(
+                                endpoint = cameraConfig.uploadApi!!.endpoint,
+                                method = cameraConfig.uploadApi!!.method,
+                                imageBytes = imageBytes,
+                                mimeType = mimeType
+                            )
+                        }
+                    } else {
+                        // If no uploadApi, return null (image will be stored locally as base64 or file path)
+                        { _, _ -> null }
                     },
+                    navController = navController,
                     onValueChange = { url ->
                         onValueChange(url)
                     },
@@ -1081,10 +1185,11 @@ private fun DynamicFormFieldRenderer(
             }
         }
         "WEBVIEW_LAUNCH" -> {
+            android.util.Log.d("DynamicFormFieldRenderer", "Rendering WEBVIEW_LAUNCH field: ${field.id}")
             val webViewConfig = field.webViewConfig
+            android.util.Log.d("DynamicFormFieldRenderer", "Field ${field.id}: webViewConfig=$webViewConfig")
             if (webViewConfig != null) {
-                var showWebView by remember { mutableStateOf(false) }
-                var webViewUrl by remember { mutableStateOf<String?>(null) }
+                android.util.Log.d("DynamicFormFieldRenderer", "Field ${field.id}: urlSource=${webViewConfig.urlSource}, staticUrl=${webViewConfig.staticUrl}")
                 
                 DynamicWebViewLaunchField(
                     field = field,
@@ -1092,31 +1197,22 @@ private fun DynamicFormFieldRenderer(
                     modifier = Modifier.focusRequester(focusRequester),
                     isEnabled = isEnabled,
                     onLaunchWebView = { url ->
-                        webViewUrl = url
-                        showWebView = true
+                        // Navigate to WebView screen with field label as title
+                        val title = field.label.takeIf { it.isNotBlank() } ?: "External Process"
+                        navController.navigate(Screen.WebView.createRoute(url, title))
                     },
                     getUrlFromApi = {
                         if (webViewConfig.launchApi != null) {
                             viewModel.getWebViewUrl(
                                 endpoint = webViewConfig.launchApi.endpoint,
-                                method = webViewConfig.launchApi.method
+                                method = webViewConfig.launchApi.method,
+                                responseUrlField = webViewConfig.responseUrlField
                             )
                         } else {
                             null
                         }
                     }
                 )
-                
-                // WebView Dialog
-                if (showWebView && webViewUrl != null) {
-                    WebViewDialog(
-                        url = webViewUrl!!,
-                        onDismiss = {
-                            showWebView = false
-                            webViewUrl = null
-                        }
-                    )
-                }
             }
         }
         "QR_SCANNER" -> {
@@ -1125,10 +1221,11 @@ private fun DynamicFormFieldRenderer(
                 DynamicQRScannerField(
                     field = field,
                     error = error,
+                    navController = navController,
                     modifier = Modifier.focusRequester(focusRequester),
                     isEnabled = isEnabled,
                     onQRScanned = { prefillData ->
-                        // Prefill target fields with scanned values
+                        // Prefill target fields with scanned values (standard JSON QR)
                         prefillData.forEach { (targetFieldId, scannedValue) ->
                             // Find the target field and its section to determine section index
                             var targetSectionIndex: Int? = null
@@ -1137,8 +1234,6 @@ private fun DynamicFormFieldRenderer(
                                 // Check main section fields
                                 section.fields.find { it.id == targetFieldId }?.let {
                                     targetSectionIndex = if (section.repeatable) {
-                                        // For repeatable sections, use the first instance (index 0) by default
-                                        // In a real scenario, you might want to determine the correct instance
                                         0
                                     } else {
                                         null
@@ -1149,7 +1244,7 @@ private fun DynamicFormFieldRenderer(
                                 section.subSections.forEach { subSection ->
                                     subSection.fields.find { it.id == targetFieldId }?.let {
                                         targetSectionIndex = if (subSection.repeatable) {
-                                            0 // Use first instance by default
+                                            0
                                         } else {
                                             null
                                         }
@@ -1159,6 +1254,103 @@ private fun DynamicFormFieldRenderer(
                             
                             // Update the field value
                             viewModel.updateFieldValue(targetFieldId, scannedValue, targetSectionIndex)
+                        }
+                    },
+                    onAadhaarQRDetected = { rawBytes ->
+                        // Handle Aadhaar Secure QR binary payload
+                        coroutineScope.launch {
+                            try {
+                                onSetDecodingAadhaar(true)
+                                
+                                // Show progress dialog
+                                onShowAadhaarDecodeProgressDialog(true)
+                                onSetAadhaarDecodeError(null)
+                                
+                                // Base64 encode rawBytes (NO_WRAP)
+                                val qrDataBase64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
+                                
+                                // Call backend decode API
+                                val result = viewModel.decodeAadhaarQR(qrDataBase64)
+                                
+                                result.onSuccess { decodedData ->
+                                    // Close progress dialog on success
+                                    onShowAadhaarDecodeProgressDialog(false)
+                                    
+                                    // Prefill fields using qrConfig.prefillMapping if available
+                                    if (qrConfig.prefillMapping.isNotEmpty()) {
+                                        qrConfig.prefillMapping.forEach { mapping ->
+                                            when (mapping.qrKey.lowercase()) {
+                                                "name", "n" -> decodedData.name?.let {
+                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
+                                                }
+                                                "gender", "g" -> decodedData.gender?.let {
+                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
+                                                }
+                                                "dob", "yob", "date_of_birth" -> decodedData.dob?.let {
+                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
+                                                }
+                                                "aadhaarlast4", "aadhaar_last4", "uid_last4" -> decodedData.aadhaarLast4?.let {
+                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Fallback: try to find fields by common names
+                                        uiState.formScreen?.sections?.forEach { section ->
+                                            section.fields.forEach { field ->
+                                                when (field.id.lowercase()) {
+                                                    "name", "full_name", "applicant_name" -> decodedData.name?.let {
+                                                        viewModel.updateFieldValue(field.id, it, null)
+                                                    }
+                                                    "gender" -> decodedData.gender?.let {
+                                                        viewModel.updateFieldValue(field.id, it, null)
+                                                    }
+                                                    "dob", "date_of_birth", "yob" -> decodedData.dob?.let {
+                                                        viewModel.updateFieldValue(field.id, it, null)
+                                                    }
+                                                    "aadhaar_last4", "uid_last4" -> decodedData.aadhaarLast4?.let {
+                                                        viewModel.updateFieldValue(field.id, it, null)
+                                                    }
+                                                }
+                                            }
+                                            
+                                            section.subSections.forEach { subSection ->
+                                                subSection.fields.forEach { field ->
+                                                    when (field.id.lowercase()) {
+                                                        "name", "full_name", "applicant_name" -> decodedData.name?.let {
+                                                            viewModel.updateFieldValue(field.id, it, null)
+                                                        }
+                                                        "gender" -> decodedData.gender?.let {
+                                                            viewModel.updateFieldValue(field.id, it, null)
+                                                        }
+                                                        "dob", "date_of_birth", "yob" -> decodedData.dob?.let {
+                                                            viewModel.updateFieldValue(field.id, it, null)
+                                                        }
+                                                        "aadhaar_last4", "uid_last4" -> decodedData.aadhaarLast4?.let {
+                                                            viewModel.updateFieldValue(field.id, it, null)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Show success Toast
+                                    Toast.makeText(context, "Aadhaar details fetched successfully", Toast.LENGTH_SHORT).show()
+                                }.onFailure { error ->
+                                    // Close progress dialog and show error
+                                    onShowAadhaarDecodeProgressDialog(false)
+                                    onSetAadhaarDecodeError(error.message ?: "Unable to read Aadhaar QR")
+                                    android.util.Log.e("DynamicFormScreen", "Aadhaar decode failed: ${error.message}", error)
+                                }
+                            } catch (e: Exception) {
+                                // Close progress dialog and show error
+                                onShowAadhaarDecodeProgressDialog(false)
+                                onSetAadhaarDecodeError(e.message ?: "Unable to read Aadhaar QR")
+                                android.util.Log.e("DynamicFormScreen", "Aadhaar QR handling exception: ${e.message}", e)
+                            } finally {
+                                onSetDecodingAadhaar(false)
+                            }
                         }
                     }
                 )
