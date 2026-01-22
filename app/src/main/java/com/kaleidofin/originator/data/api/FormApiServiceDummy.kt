@@ -1503,7 +1503,23 @@ class FormApiServiceDummy @Inject constructor(
             name = "John Doe",
             gender = "M",
             dob = "1990-01-01",
-            aadhaarLast4 = "1234"
+            yob = null,
+            aadhaarLast4 = "1234",
+            careOf = null,
+            house = null,
+            landmark = null,
+            location = null,
+            street = null,
+            subDistrict = null,
+            district = null,
+            state = null,
+            pinCode = null,
+            postOffice = null,
+            vtc = null,
+            address = null,
+            emailHash = null,
+            mobileHash = null,
+            signature = null
         )
     }
     

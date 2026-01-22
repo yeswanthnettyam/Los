@@ -520,8 +520,8 @@ class DynamicFormViewModel @Inject constructor(
                         isLoading = false,
                         error = e.message ?: "Failed to start flow"
                     )
-                }
-            }
+        }
+    }
         }
     }
     
@@ -1115,7 +1115,7 @@ class DynamicFormViewModel @Inject constructor(
                     // Only include non-null values - filter out any nulls from normalization
                     normalizedValue?.let { entry.key to it }
                 }.toMap()
-                
+            
                 // Update dummy JSON with form data for testing (if needed)
                 formDataSource.updateFormData(screen.screenId, unwrappedFormData)
                 
@@ -1124,7 +1124,7 @@ class DynamicFormViewModel @Inject constructor(
                 val branchCode = currentState.branchCode
                 
                 android.util.Log.d("DynamicFormViewModel", "📤 SCREEN SUBMIT - applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}")
-                
+            
                 // Call Runtime API - SCREEN PROGRESSION MODE
                 // applicationId and currentScreenId from RuntimeSession
                 android.util.Log.d("DynamicFormViewModel", "📡 Runtime API CALL (SCREEN PROGRESSION) - applicationId: ${runtimeSession.applicationId}, currentScreenId: ${runtimeSession.currentScreenId}, flowId: ${runtimeSession.flowId}")

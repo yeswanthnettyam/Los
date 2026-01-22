@@ -91,7 +91,7 @@ fun DynamicFormScreen(
     // Snackbar messages for verification (fallback when showDialog is false)
     var verificationErrorMessage by remember { mutableStateOf<String?>(null) }
     var verificationSuccessMessage by remember { mutableStateOf<String?>(null) }
-    
+
     // Show snackbar messages (only when dialog is not shown)
     LaunchedEffect(verificationErrorMessage) {
         verificationErrorMessage?.let {
@@ -453,9 +453,9 @@ fun DynamicFormScreen(
                                             }
                                         }
                                     }
-                                )
+                        )
                                 Spacer(Modifier.height(16.dp))
-                            }
+                    }
                         }
                     }
 
@@ -650,10 +650,10 @@ fun DynamicFormScreen(
                                         },
                                         onFailure = { error ->
                                             verificationErrorMessage = error
-                                        }
-                                    )
-                                }
-                            }
+                        }
+                    )
+                }
+            }
                         )
                     }
                 }
@@ -1277,19 +1277,34 @@ private fun DynamicFormFieldRenderer(
                                     // Prefill fields using qrConfig.prefillMapping if available
                                     if (qrConfig.prefillMapping.isNotEmpty()) {
                                         qrConfig.prefillMapping.forEach { mapping ->
-                                            when (mapping.qrKey.lowercase()) {
-                                                "name", "n" -> decodedData.name?.let {
-                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
-                                                }
-                                                "gender", "g" -> decodedData.gender?.let {
-                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
-                                                }
-                                                "dob", "yob", "date_of_birth" -> decodedData.dob?.let {
-                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
-                                                }
-                                                "aadhaarlast4", "aadhaar_last4", "uid_last4" -> decodedData.aadhaarLast4?.let {
-                                                    viewModel.updateFieldValue(mapping.targetFieldId, it, null)
-                                                }
+                                            // Get value from decodedData using reflection or map lookup
+                                            val value = when (mapping.qrKey.lowercase()) {
+                                                "name", "n" -> decodedData.name
+                                                "gender", "g" -> decodedData.gender
+                                                "dob", "date_of_birth" -> decodedData.dob
+                                                "yob" -> decodedData.yob
+                                                "aadhaarlast4", "aadhaar_last4", "uid_last4" -> decodedData.aadhaarLast4
+                                                "careof", "care_of" -> decodedData.careOf
+                                                "house" -> decodedData.house
+                                                "landmark" -> decodedData.landmark
+                                                "location" -> decodedData.location
+                                                "street" -> decodedData.street
+                                                "subdistrict", "sub_district" -> decodedData.subDistrict
+                                                "district" -> decodedData.district
+                                                "state" -> decodedData.state
+                                                "pincode", "pin_code" -> decodedData.pinCode
+                                                "postoffice", "post_office" -> decodedData.postOffice
+                                                "vtc" -> decodedData.vtc
+                                                "address" -> decodedData.address
+                                                "emailhash", "email_hash" -> decodedData.emailHash
+                                                "mobilehash", "mobile_hash" -> decodedData.mobileHash
+                                                "signature" -> decodedData.signature
+                                                else -> null
+                                            }
+                                            
+                                            // Update field if value is not null
+                                            value?.let {
+                                                viewModel.updateFieldValue(mapping.targetFieldId, it, null)
                                             }
                                         }
                                     } else {
