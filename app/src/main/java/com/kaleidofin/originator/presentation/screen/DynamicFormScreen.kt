@@ -1256,8 +1256,8 @@ private fun DynamicFormFieldRenderer(
                             viewModel.updateFieldValue(targetFieldId, scannedValue, targetSectionIndex)
                         }
                     },
-                    onAadhaarQRDetected = { rawBytes ->
-                        // Handle Aadhaar Secure QR binary payload
+                    onAadhaarQRDetected = { qrDataString ->
+                        // Handle Aadhaar Secure QR numeric string
                         coroutineScope.launch {
                             try {
                                 onSetDecodingAadhaar(true)
@@ -1266,11 +1266,9 @@ private fun DynamicFormFieldRenderer(
                                 onShowAadhaarDecodeProgressDialog(true)
                                 onSetAadhaarDecodeError(null)
                                 
-                                // Base64 encode rawBytes (NO_WRAP)
-                                val qrDataBase64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
-                                
+                                // Pass numeric string directly (no Base64 encoding)
                                 // Call backend decode API
-                                val result = viewModel.decodeAadhaarQR(qrDataBase64)
+                                val result = viewModel.decodeAadhaarQR(qrDataString)
                                 
                                 result.onSuccess { decodedData ->
                                     // Close progress dialog on success

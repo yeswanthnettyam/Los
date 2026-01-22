@@ -57,7 +57,7 @@ class FormDataSourceImpl @Inject constructor(
     
     override suspend fun decodeAadhaarQR(qrDataBase64: String): Result<AadhaarDecodeResponseDto> {
         return try {
-            val request = AadhaarDecodeRequestDto(qrPayloadBase64 = qrDataBase64)
+            val request = AadhaarDecodeRequestDto(qrPayload = qrDataBase64)
             val response = formApiService.decodeAadhaarQR(request)
             Result.success(response)
         } catch (e: Exception) {

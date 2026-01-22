@@ -57,7 +57,6 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
-import android.util.Base64
 import com.kaleidofin.originator.data.dto.AadhaarDecodeResponseDto
 import androidx.camera.core.ImageProxy
 import java.util.concurrent.atomic.AtomicBoolean
@@ -66,7 +65,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 fun QRScannerScreen(
     qrConfig: QRConfig,
     onQRScanned: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null,
+    onAadhaarQRDetected: ((String) -> Unit)? = null,
     onNavigateBack: () -> Unit,
     onDecodeAadhaarQR: ((String) -> kotlinx.coroutines.Deferred<Result<AadhaarDecodeResponseDto>>)? = null
 ) {
@@ -99,7 +98,7 @@ fun QRScannerScreen(
                     onQRScanned(prefillData)
                     onNavigateBack()
                 },
-                onAadhaarQRDetected = { rawBytes ->
+                onAadhaarQRDetected = { qrDataString ->
                     // Mark as processed to prevent duplicate detection during API call
                     isQrProcessed.set(true)
                     
@@ -110,18 +109,14 @@ fun QRScannerScreen(
                                 showDecodeProgress = true
                                 decodeError = null
                                 
-                                // Convert raw bytes to base64
-                                val qrDataBase64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
-                                
-                                // Call decode API
-                                val result = onDecodeAadhaarQR(qrDataBase64).await()
+                                // Send numeric QR string directly (no Base64 encoding)
+                                val result = onDecodeAadhaarQR(qrDataString).await()
                                 
                                 showDecodeProgress = false
                                 
                                 result.onSuccess { decodedData ->
-                                    // API call successful - pass decoded data via callback and navigate back
-                                    onAadhaarQRDetected?.invoke(rawBytes)
-                                    onNavigateBack()
+                                    // API call successful - pass numeric string via callback (navigation handled by callback)
+                                    onAadhaarQRDetected?.invoke(qrDataString)
                                 }.onFailure { error ->
                                     // API call failed - show error but keep scanning active
                                     decodeError = error.message ?: "Unable to decode Aadhaar QR"
@@ -137,7 +132,7 @@ fun QRScannerScreen(
                         }
                     } else {
                         // No decode function provided - use callback directly
-                        onAadhaarQRDetected?.invoke(rawBytes)
+                        onAadhaarQRDetected?.invoke(qrDataString)
                         onNavigateBack()
                     }
                 },
@@ -251,7 +246,7 @@ fun QRScannerScreen(
                                     onQRScanned(prefillData)
                                     onNavigateBack()
                                 },
-                                onAadhaarQRDetected = { rawBytes ->
+                                onAadhaarQRDetected = { qrDataString ->
                                     // Mark as processed IMMEDIATELY to prevent duplicate detection
                                     isQrProcessed.set(true)
                                     
@@ -262,21 +257,17 @@ fun QRScannerScreen(
                                                 showDecodeProgress = true
                                                 decodeError = null
                                                 
-                                                // Convert raw bytes to base64
-                                                val qrDataBase64 = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
-                                                
-                                                // Call decode API
-                                                val result = onDecodeAadhaarQR(qrDataBase64).await()
+                                                // Send numeric QR string directly (no Base64 encoding)
+                                                val result = onDecodeAadhaarQR(qrDataString).await()
                                                 
                                                 showDecodeProgress = false
                                                 
                                                 result.onSuccess { decodedData ->
-                                                    // API call successful - stop scanning and navigate back
+                                                    // API call successful - stop scanning (navigation handled by callback)
                                                     isScanning = false
                                                     imageAnalysis.clearAnalyzer()
                                                     analyzerExecutor.shutdown()
-                                                    onAadhaarQRDetected?.invoke(rawBytes)
-                                                    onNavigateBack()
+                                                    onAadhaarQRDetected?.invoke(qrDataString)
                                                 }.onFailure { error ->
                                                     // API call failed - show error but keep scanning active
                                                     decodeError = error.message ?: "Unable to decode Aadhaar QR"
@@ -297,7 +288,7 @@ fun QRScannerScreen(
                                         isScanning = false
                                         imageAnalysis.clearAnalyzer()
                                         analyzerExecutor.shutdown()
-                                        onAadhaarQRDetected?.invoke(rawBytes)
+                                        onAadhaarQRDetected?.invoke(qrDataString)
                                         onNavigateBack()
                                     }
                                 }
@@ -651,7 +642,7 @@ private fun processQRImage(
     qrConfig: QRConfig,
     isQrProcessed: AtomicBoolean,
     onSuccess: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null
+    onAadhaarQRDetected: ((String) -> Unit)? = null
 ) {
     val mediaImage = imageProxy.image ?: run {
         imageProxy.close()
@@ -671,9 +662,12 @@ private fun processQRImage(
             if (isQrProcessed.get()) return@addOnSuccessListener
             if (barcodes.isEmpty()) return@addOnSuccessListener
 
-            // Aadhaar QR FIRST (binary, large payload)
+            // Aadhaar QR FIRST (numeric string, 3000-4000 chars)
             val aadhaarQr = barcodes.firstOrNull {
-                it.rawBytes != null && it.rawBytes!!.size > 1000
+                val rawValue = it.rawValue
+                rawValue != null && 
+                rawValue.length > 1000 && 
+                rawValue.all { char -> char.isDigit() }
             }
 
             if (aadhaarQr != null) {
@@ -681,7 +675,8 @@ private fun processQRImage(
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
                 }
-                onAadhaarQRDetected?.invoke(aadhaarQr.rawBytes!!)
+                // Pass numeric string directly to callback
+                onAadhaarQRDetected?.invoke(aadhaarQr.rawValue!!)
                 return@addOnSuccessListener
             }
 
@@ -722,7 +717,7 @@ private fun processImageFromGallery(
     imageUri: Uri,
     qrConfig: QRConfig,
     onSuccess: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null,
+    onAadhaarQRDetected: ((String) -> Unit)? = null,
     onDecodeAadhaarQR: ((String) -> kotlinx.coroutines.Deferred<Result<AadhaarDecodeResponseDto>>)? = null,
     coroutineScope: kotlinx.coroutines.CoroutineScope? = null,
     onShowDecodeProgress: ((Boolean) -> Unit)? = null,
@@ -740,16 +735,20 @@ private fun processImageFromGallery(
                     return@addOnSuccessListener
                 }
 
-                // 🔥 Aadhaar QR FIRST (binary, large payload)
+                // Aadhaar QR FIRST (numeric string, 3000-4000 chars)
                 val aadhaarQr = barcodes.firstOrNull {
-                    it.rawBytes != null && it.rawBytes!!.size > 1000
+                    val rawValue = it.rawValue
+                    rawValue != null && 
+                    rawValue.length > 1000 && 
+                    rawValue.all { char -> char.isDigit() }
                 }
 
                 if (aadhaarQr != null) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         Toast.makeText(context, "Aadhaar QR detected", Toast.LENGTH_LONG).show()
                     }
-                    onAadhaarQRDetected?.invoke(aadhaarQr.rawBytes!!)
+                    // Pass numeric string to callback (will be converted to ByteArray at call site)
+                    onAadhaarQRDetected?.invoke(aadhaarQr.rawValue!!)
                     return@addOnSuccessListener
                 }
 

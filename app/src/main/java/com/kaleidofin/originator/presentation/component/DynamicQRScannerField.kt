@@ -46,7 +46,7 @@ fun DynamicQRScannerField(
     field: FormField,
     error: String?,
     onQRScanned: (Map<String, String>) -> Unit, // Map<targetFieldId, value> -> Unit
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null, // Callback for Aadhaar QR binary payload
+    onAadhaarQRDetected: ((String) -> Unit)? = null, // Callback for Aadhaar QR numeric string
     navController: NavController,
     modifier: Modifier = Modifier,
     isEnabled: Boolean = true
@@ -65,10 +65,10 @@ fun DynamicQRScannerField(
             onQRScanned(prefillData)
         }
         
-        savedStateHandle?.get<ByteArray>("aadhaarQRData")?.let { rawBytes ->
-            savedStateHandle.remove<ByteArray>("aadhaarQRData")
+        savedStateHandle?.get<String>("aadhaarQRData")?.let { qrDataString ->
+            savedStateHandle.remove<String>("aadhaarQRData")
             scanError = null
-            onAadhaarQRDetected?.invoke(rawBytes)
+            onAadhaarQRDetected?.invoke(qrDataString)
         }
     }
     
@@ -144,7 +144,7 @@ fun DynamicQRScannerField(
 private fun QRScannerDialog(
     qrConfig: QRConfig,
     onQRScanned: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null,
+    onAadhaarQRDetected: ((String) -> Unit)? = null,
     onDismiss: () -> Unit,
     onError: (String) -> Unit
 ) {
@@ -262,13 +262,13 @@ private fun QRScannerDialog(
                                             analyzerExecutor.shutdown()
                                             onQRScanned(prefillData)
                                         },
-                                        onAadhaarQRDetected = { rawBytes ->
+                                        onAadhaarQRDetected = { qrDataString ->
                                             // Mark as processed and stop analysis immediately
                                             isQrProcessed.set(true)
                                             isScanning = false
                                             imageAnalysis.clearAnalyzer()
                                             analyzerExecutor.shutdown()
-                                            onAadhaarQRDetected?.invoke(rawBytes)
+                                            onAadhaarQRDetected?.invoke(qrDataString)
                                         }
                                     )
                                 } else {
@@ -326,7 +326,7 @@ private fun processQRImage(
     context: Context,
     isQrProcessed: java.util.concurrent.atomic.AtomicBoolean,
     onSuccess: (Map<String, String>) -> Unit,
-    onAadhaarQRDetected: ((ByteArray) -> Unit)? = null
+    onAadhaarQRDetected: ((String) -> Unit)? = null
 ) {
     // Early return if QR has already been processed
     if (isQrProcessed.get()) {
@@ -401,25 +401,20 @@ private fun processQRImage(
                 // ============================================================
                 // Requirements:
                 // 1. format == Barcode.FORMAT_QR_CODE
-                // 2. rawBytes != null
-                // 3. rawBytes.size > 1000 (Aadhaar Secure QR is ~3KB)
+                // 2. rawValue != null
+                // 3. rawValue.length > 1000 AND digits only (Aadhaar Secure QR is numeric string)
                 // ============================================================
-                var validAadhaarBarcode: com.google.mlkit.vision.barcode.common.Barcode? = null
-                
-                for (barcode in barcodes) {
-                    val rawBytes = barcode.rawBytes
-                    if (barcode.format == Barcode.FORMAT_QR_CODE &&
-                        rawBytes != null &&
-                        rawBytes.size > 1000) {
-                        validAadhaarBarcode = barcode
-                        android.util.Log.d("QRScanner", "Valid Aadhaar QR found: format=QR_CODE, rawBytes size=${rawBytes.size} bytes")
-                        break // Use FIRST valid barcode only
-                    }
+                val aadhaarQr = barcodes.firstOrNull {
+                    val rawValue = it.rawValue
+                    it.format == Barcode.FORMAT_QR_CODE &&
+                    rawValue != null &&
+                    rawValue.length > 1000 &&
+                    rawValue.all { char -> char.isDigit() }
                 }
                 
                 // Process valid Aadhaar Secure QR if found
-                if (validAadhaarBarcode != null) {
-                    val rawBytes = validAadhaarBarcode.rawBytes!!
+                if (aadhaarQr != null) {
+                    val qrDataString = aadhaarQr.rawValue!!
                     
                     // CRITICAL: Close imageProxy ONLY after ML Kit processing completes
                     imageProxy.close()
@@ -432,8 +427,8 @@ private fun processQRImage(
                     
                     // Call Aadhaar QR handler if provided
                     if (onAadhaarQRDetected != null) {
-                        android.util.Log.d("QRScanner", "Selected barcode rawBytes size=${rawBytes.size} bytes")
-                        onAadhaarQRDetected.invoke(rawBytes)
+                        android.util.Log.d("QRScanner", "Aadhaar QR detected: length=${qrDataString.length}")
+                        onAadhaarQRDetected.invoke(qrDataString)
                     } else {
                         android.util.Log.w("QRScanner", "Aadhaar QR detected but no handler provided")
                     }

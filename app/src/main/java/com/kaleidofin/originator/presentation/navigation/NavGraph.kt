@@ -249,10 +249,19 @@ fun NavGraph(navController: NavHostController) {
                     navController.previousBackStackEntry?.savedStateHandle?.set("qrScannedData", prefillData)
                     navController.popBackStack()
                 },
-                onAadhaarQRDetected = { rawBytes ->
-                    // Set the Aadhaar QR data in the previous back stack entry
-                    navController.previousBackStackEntry?.savedStateHandle?.set("aadhaarQRData", rawBytes)
-                    navController.popBackStack()
+                onAadhaarQRDetected = { qrDataString ->
+                    // Set the Aadhaar QR data in the previous back stack entry (should be DynamicFormScreen)
+                    // The previousBackStackEntry should be the screen that navigated to QR scanner
+                    val previousEntry = navController.previousBackStackEntry
+                    if (previousEntry != null) {
+                        // Set data in previous entry (DynamicFormScreen)
+                        previousEntry.savedStateHandle.set("aadhaarQRData", qrDataString)
+                        // Pop back to previous screen (DynamicFormScreen)
+                        navController.popBackStack()
+                    } else {
+                        // Fallback: if previousEntry is null, just pop (shouldn't happen in normal flow)
+                        navController.popBackStack()
+                    }
                 },
                 onNavigateBack = {
                     navController.popBackStack()

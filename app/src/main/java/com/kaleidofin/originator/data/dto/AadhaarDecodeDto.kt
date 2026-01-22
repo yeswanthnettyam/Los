@@ -7,8 +7,8 @@ import com.google.gson.annotations.SerializedName
  * POST /api/v1/qr/aadhaar/decode
  */
 data class AadhaarDecodeRequestDto(
-    @SerializedName("qrPayloadBase64")
-    val qrPayloadBase64: String // Base64-encoded QR payload (NO_WRAP)
+    @SerializedName("qrPayload")
+    val qrPayload: String // Numeric Aadhaar QR string
 )
 
 /**

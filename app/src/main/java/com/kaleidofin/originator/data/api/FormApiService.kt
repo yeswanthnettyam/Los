@@ -47,8 +47,8 @@ interface FormApiService {
      * Aadhaar QR Decode API
      * POST /api/v1/qr/aadhaar/decode
      * 
-     * Decodes UIDAI Secure QR binary payload
-     * Frontend sends Base64-encoded rawBytes, backend returns decoded data
+     * Decodes UIDAI Secure QR numeric payload
+     * Frontend sends numeric QR string, backend returns decoded data
      */
     @POST("api/v1/qr/aadhaar/decode")
     suspend fun decodeAadhaarQR(@Body request: AadhaarDecodeRequestDto): AadhaarDecodeResponseDto
