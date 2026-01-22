@@ -1806,13 +1806,13 @@ class DynamicFormViewModel @Inject constructor(
     /**
      * Decode Aadhaar QR using backend API
      * 
-     * @param qrDataBase64 Base64-encoded QR payload (NO_WRAP)
+     * @param qrDataString Numeric QR string (Base10)
      * @return Result containing decoded Aadhaar data or error
      */
-    suspend fun decodeAadhaarQR(qrDataBase64: String): Result<com.kaleidofin.originator.data.dto.AadhaarDecodeResponseDto> {
+    suspend fun decodeAadhaarQR(qrDataString: String): Result<com.kaleidofin.originator.data.dto.AadhaarDecodeResponseDto> {
         return try {
-            android.util.Log.d("DynamicFormViewModel", "Sending Aadhaar QR payload, base64 length = ${qrDataBase64.length}")
-            val result = formDataSource.decodeAadhaarQR(qrDataBase64)
+            android.util.Log.d("DynamicFormViewModel", "Sending Aadhaar QR payload to backend, length = ${qrDataString.length}")
+            val result = formDataSource.decodeAadhaarQR(qrDataString)
             
             result.onSuccess { response ->
                 android.util.Log.d("DynamicFormViewModel", "Aadhaar decode API success: name=${response.name != null}, gender=${response.gender != null}, dob=${response.dob != null}, aadhaarLast4=${response.aadhaarLast4 != null}")
